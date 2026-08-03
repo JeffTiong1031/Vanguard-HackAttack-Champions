@@ -26,6 +26,7 @@ import { installGate } from '../src/gate/gate';
 import { SessionNumbering } from '../src/mask/placeholder';
 import { createComposerHints } from '../src/ui/composer-hints';
 import { clearChips, renderChips, showRedactionFailure } from '../src/ui/file-chip';
+import { installVoiceWarning } from '../src/ui/voice-warning';
 import {
   hideModal,
   hideOversizedDialog,
@@ -60,6 +61,11 @@ export default defineContentScript({
     const numbering = new SessionNumbering();
     const hashes = new Map<string, string>();
     const files = new FileStore();
+
+    // Voice can move content to the provider without passing through the typed
+    // prompt flow. Hold the provider click while the anchored warning dropdown
+    // asks the employee whether to continue.
+    installVoiceWarning();
 
     files.subscribe(() => renderChips(files.list(), (id) => files.remove(id)));
 
