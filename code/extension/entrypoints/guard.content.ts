@@ -1,3 +1,4 @@
+import { capabilitiesFor, getMode } from '../src/mode/mode';
 import { POLICY_CONFIG } from '../src/policy/config';
 import { toolForHost } from '../src/policy/lookup';
 import type { PolicyRequest, PolicyResponse } from '../src/policy/messages';
@@ -28,7 +29,10 @@ export default defineContentScript({
   matches: REGISTRY_MATCHES,
   runAt: 'document_idle',
   world: 'ISOLATED',
-  main() {
+  async main() {
+    const caps = capabilitiesFor((await getMode()) ?? 'personal');
+    if (!caps.toolPolicy) return;   // Personal: no warn banner, no polling, no events
+
     let shownFor: string | null = null;   // llm_id the banner is currently up for
     let dismissed = false;                // per page load; a reload warns again
     let reportedVisit = false;
