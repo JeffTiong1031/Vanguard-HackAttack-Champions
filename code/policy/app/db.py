@@ -157,6 +157,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     _migrate_appeals(conn)
     _migrate_hierarchy(conn)
+    _migrate_analytics(conn)
     conn.commit()
 
 
@@ -191,6 +192,18 @@ def _migrate_hierarchy(conn: sqlite3.Connection) -> None:
     for table, column, ddl in adds:
         if column not in cols(table):
             conn.execute(ddl)
+
+
+def _migrate_analytics(conn: sqlite3.Connection) -> None:
+    """Add the admin-supplied employee-name label to tokens and employees.
+    Migration-only: init_schema runs this after executescript(SCHEMA), so a
+    fresh DB (whose SCHEMA has no `name`) gets the column here too."""
+    def cols(table: str) -> set[str]:
+        return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+    if "name" not in cols("enroll_tokens"):
+        conn.execute("ALTER TABLE enroll_tokens ADD COLUMN name TEXT")
+    if "name" not in cols("employees"):
+        conn.execute("ALTER TABLE employees ADD COLUMN name TEXT")
 
 
 def bump_policy_version(conn: sqlite3.Connection, org_id: str) -> int:
