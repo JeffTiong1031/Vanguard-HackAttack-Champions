@@ -1,92 +1,101 @@
 import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
-import { api, UnauthorisedError } from './api';
+import { api, UnauthorisedError, type Session, type Scope } from './api';
 import { Login } from './screens/Login';
+import { Signup } from './screens/Signup';
 import { Tools } from './screens/Tools';
+import { Departments } from './screens/Departments';
 import { Requests } from './screens/Requests';
+import { Reviews } from './screens/Reviews';
 import { Usage } from './screens/Usage';
 import { Tokens } from './screens/Tokens';
-import { Reviews } from './screens/Reviews';
+import { DeptTools } from './screens/DeptTools';
 import { LayersIcon, ShieldIcon, InboxIcon, BarIcon, KeyIcon, GavelIcon } from './icons';
 import './style.css';
 
-type Screen = 'tools' | 'requests' | 'usage' | 'tokens' | 'reviews';
+const SESSION_KEY = 'vg_admin_session';
 
-const TABS: [Screen, string, typeof ShieldIcon][] = [
-  ['tools', 'Tools', ShieldIcon],
-  ['requests', 'Requests', InboxIcon],
-  ['reviews', 'Reviews', GavelIcon],
-  ['usage', 'Usage', BarIcon],
-  ['tokens', 'Tokens', KeyIcon],
-];
+type TabDef = [string, string, typeof ShieldIcon, preact.ComponentChildren];
 
-// The org NAME only -- never a token or credential. It is not a secret; it is
-// display text ("Acme Corp" in the nav bar) and a hint to re-check the cookie
-// on the next mount. The HttpOnly session cookie remains the sole authority;
-// this value is never sent anywhere and never trusted on its own (see the
-// verification call below).
-const ORG_KEY = 'vg_admin_org';
+function loadSession(): Session | null {
+  try { return JSON.parse(localStorage.getItem(SESSION_KEY) ?? 'null'); } catch { return null; }
+}
 
 function App() {
-  const [org, setOrg] = useState<string | null>(null);
-  const [screen, setScreen] = useState<Screen>('tools');
-  // Only block on a "checking" screen if there's a cached org name to verify.
-  // A fresh visitor with no cached session goes straight to Login -- no flash.
-  const [checking, setChecking] = useState(() => !!localStorage.getItem(ORG_KEY));
+  const [session, setSession] = useState<Session | null>(loadSession);
+  const [view, setView] = useState<'login' | 'signup'>('login');
+  const [checking, setChecking] = useState(() => !!loadSession());
 
-  // (b) Page refresh must not lose a valid session. There is no /v1/admin/me
-  // and app/ is frozen, so the cookie is verified with a real authenticated
-  // call -- GET /v1/admin/tools is the cheapest one that exists. If it 401s,
-  // the cached name is stale (session actually expired) and is dropped. If it
-  // fails for some other reason (e.g. the backend isn't up yet), the cached
-  // name is left alone -- that's not evidence the session is invalid, just
-  // that this check couldn't complete -- and the user sees Login until a
-  // retry (reload) succeeds.
-  //
-  // A REJECTED fetch falls through to Login correctly on its own, but a
-  // HUNG one (server unreachable mid-request, network stall) would leave
-  // this screen on "Checking session..." forever, with no retry available.
-  // Race the verification against a timeout so a hang degrades the same way
-  // a rejection does: back to Login, cached name left alone (the cookie may
-  // still be valid -- logging in again is cheap; being stuck is not
-  // recoverable without a reload).
+  // Verify a cached session with a role-appropriate authenticated call. A 401
+  // means it expired -> drop it. Any other failure leaves it alone (the backend
+  // may simply be down); the user retries with a reload. Timeout so a hung
+  // request degrades the same way a rejection does.
   useEffect(() => {
-    const cached = localStorage.getItem(ORG_KEY);
+    const cached = loadSession();
     if (!cached) return;
+    const probe = cached.role === 'company' ? '/v1/admin/departments' : '/v1/dept/requests';
     const timeout = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('session check timed out')), 5000));
-    Promise.race([api.get('/v1/admin/tools'), timeout])
-      .then(() => { setOrg(cached); setChecking(false); })
+    Promise.race([api.get(probe), timeout])
+      .then(() => { setSession(cached); setChecking(false); })
       .catch((err) => {
-        if (err instanceof UnauthorisedError) localStorage.removeItem(ORG_KEY);
+        if (err instanceof UnauthorisedError) localStorage.removeItem(SESSION_KEY);
         setChecking(false);
       });
   }, []);
 
-  // (a) A 401 anywhere must bounce back to Login, without every screen having
-  // to catch it individually. Tools/Tokens/etc. call the API directly and
-  // don't catch UnauthorisedError themselves (per their brief); when that
-  // promise rejects uncaught, it surfaces here as a window `unhandledrejection`
-  // -- one place clears auth state for the whole shell.
+  // A 401 anywhere bounces to login (screens don't catch UnauthorisedError).
   useEffect(() => {
     function onRejection(event: PromiseRejectionEvent) {
       if (event.reason instanceof UnauthorisedError) {
         event.preventDefault();
-        localStorage.removeItem(ORG_KEY);
-        setOrg(null);
+        localStorage.removeItem(SESSION_KEY);
+        setSession(null);
       }
     }
     window.addEventListener('unhandledrejection', onRejection);
     return () => window.removeEventListener('unhandledrejection', onRejection);
   }, []);
 
-  function handleLogin(orgName: string) {
-    localStorage.setItem(ORG_KEY, orgName);
-    setOrg(orgName);
+  function handleLogin(s: Session) {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+    setSession(s);
+    setView('login');
+  }
+
+  async function logout() {
+    try { await api.post('/v1/admin/logout'); } catch { /* clear locally regardless */ }
+    localStorage.removeItem(SESSION_KEY);
+    setSession(null);
   }
 
   if (checking) return <div class="login-wrap"><p class="empty">Checking session…</p></div>;
-  if (!org) return <Login onDone={handleLogin} />;
+  if (!session) {
+    return view === 'signup'
+      ? <Signup onBack={() => setView('login')} />
+      : <Login onDone={handleLogin} onCreate={() => setView('signup')} />;
+  }
+  return <Dashboard session={session} onLogout={logout} />;
+}
+
+function Dashboard({ session, onLogout }: { session: Session; onLogout: () => void }) {
+  const isCompany = session.role === 'company';
+  const tabs: TabDef[] = isCompany
+    ? [
+        ['departments', 'Departments', KeyIcon, <Departments />],
+        ['tools', 'Tools', ShieldIcon, <Tools />],
+        ['requests', 'Requests', InboxIcon, <Requests scope="company" />],
+        ['reviews', 'Reviews', GavelIcon, <Reviews scope="company" />],
+        ['usage', 'Usage', BarIcon, <Usage scope="company" />],
+      ]
+    : [
+        ['requests', 'Requests', InboxIcon, <Requests scope="department" />],
+        ['reviews', 'Reviews', GavelIcon, <Reviews scope="department" />],
+        ['tokens', 'Employee Tokens', KeyIcon, <Tokens />],
+        ['tools', 'Tools', ShieldIcon, <DeptTools />],
+        ['usage', 'Usage', BarIcon, <Usage scope="department" />],
+      ];
+  const [active, setActive] = useState(tabs[0][0]);
 
   return (
     <div class="app">
@@ -95,30 +104,25 @@ function App() {
           <span class="brand-mark"><LayersIcon /></span>
           <div>
             <div class="brand-name">Vanguard</div>
-            <div class="brand-sub">AI Governance</div>
+            <div class="brand-sub">{isCompany ? 'Company Admin' : 'Department Admin'}</div>
           </div>
         </div>
         <div class="topbar-right">
-          <span class="chip"><span class="dot" style="background:#4f46e5"></span> <strong>{org}</strong></span>
-          <span class="chip live"><span class="dot"></span> Live</span>
+          <span class="chip"><span class="dot" style="background:#4f46e5"></span> <strong>{session.org_name}</strong></span>
+          {!isCompany && <span class="chip"><strong>{session.department}</strong></span>}
+          <button class="btn-sm" onClick={onLogout}>Sign out</button>
         </div>
       </header>
 
       <nav class="tabs">
-        {TABS.map(([id, label, Icon]) => (
-          <button key={id} class={screen === id ? 'active' : ''} onClick={() => setScreen(id)}>
+        {tabs.map(([id, label, Icon]) => (
+          <button key={id} class={active === id ? 'active' : ''} onClick={() => setActive(id)}>
             <Icon /> {label}
           </button>
         ))}
       </nav>
 
-      <main>
-        {screen === 'tools' && <Tools />}
-        {screen === 'requests' && <Requests />}
-        {screen === 'reviews' && <Reviews />}
-        {screen === 'usage' && <Usage />}
-        {screen === 'tokens' && <Tokens />}
-      </main>
+      <main>{tabs.find((t) => t[0] === active)![3]}</main>
     </div>
   );
 }
