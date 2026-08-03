@@ -101,6 +101,7 @@ from app.routes import enroll as _enroll  # noqa: E402
 from app.routes import events as _events  # noqa: E402
 from app.routes import policy as _policy  # noqa: E402
 from app.routes import requests as _requests  # noqa: E402
+from app.routes import signup as _signup  # noqa: E402
 
 app.include_router(_admin.router)
 app.include_router(_appeals.router)
@@ -108,6 +109,7 @@ app.include_router(_enroll.router)
 app.include_router(_events.router)
 app.include_router(_policy.router)
 app.include_router(_requests.router)
+app.include_router(_signup.router)
 
 from pathlib import Path  # noqa: E402
 
