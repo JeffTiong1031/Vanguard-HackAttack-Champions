@@ -43,10 +43,17 @@ def test_bump_returns_the_new_version_and_persists_it():
 
 
 def test_employees_table_has_no_column_that_could_hold_a_name():
-    """Pseudonymity is a schema property, not a convention (spec section 8)."""
+    """Pseudonymity is a schema property, not a convention (spec section 8).
+
+    `department_id` (added by the department-hierarchy migration) is a UUID
+    foreign key into `departments`, not a name or email column -- it is
+    included in the allowed set deliberately. The assertion's job is to catch
+    a NAME/EMAIL column, not to freeze the column count.
+    """
     conn = _conn()
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(employees)")}
-    assert cols == {"id", "org_id", "pseudo_id", "department", "created_at"}
+    assert cols == {"id", "org_id", "pseudo_id", "department", "department_id", "created_at"}
+    assert not cols & {"name", "full_name", "email", "email_address"}
 
 
 def test_decision_appeals_table_exists_with_expected_columns():

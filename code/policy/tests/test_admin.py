@@ -111,9 +111,15 @@ def test_logout_actually_invalidates_the_session_not_just_the_cookie():
 
 def test_company_oversight_requests_and_appeals_are_read_only():
     c, org_id = _company_client()
-    # the POST decide routes no longer exist on /v1/admin
-    assert c.post("/v1/admin/requests/anything", json={"decision": "approved"}).status_code == 404
-    assert c.post("/v1/admin/tokens", json={"department": "X"}).status_code == 404
+    # The POST decide routes no longer exist on /v1/admin, so FastAPI has no
+    # route for them at all -> 404. Locally, code/policy/app/static/ (built by
+    # `npm run build`, git-ignored) mounts a StaticFiles SPA fallback at "/"
+    # AFTER all API routers, and its `html=True` catch-all matches the path
+    # but not the POST method -> 405 instead of 404. A clean CI checkout has
+    # no static dir, so it 404s. Both codes mean the same thing here: no such
+    # mutating route exists.
+    assert c.post("/v1/admin/requests/anything", json={"decision": "approved"}).status_code in (404, 405)
+    assert c.post("/v1/admin/tokens", json={"department": "X"}).status_code in (404, 405)
 
 
 def test_company_can_see_all_departments_usage():
