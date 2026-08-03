@@ -7,7 +7,6 @@ from fastapi.responses import JSONResponse
 from starlette.requests import Request
 
 from app.deps import get_conn
-from app.seed import seed_demo_org
 
 # No APM, no body capture. Same posture as code/backend/app/main.py, and this
 # module is where a reviewer looks to confirm it.
@@ -76,23 +75,6 @@ async def _validation_error(request: Request, exc: RequestValidationError) -> JS
 @app.get("/healthz")
 async def healthz() -> dict[str, bool]:
     return {"ok": True}
-
-
-def bootstrap_demo(name: str = "Acme Corp", password: str = "vanguard") -> str:
-    """Create the demo org if the database has none. Called by scripts/seed.py."""
-    conn = get_conn()
-    # ORDER BY rowid, not a bare LIMIT 1. Without it SQLite may return ANY
-    # org once a second one exists, so "the demo org" silently became
-    # whichever row the planner happened to reach -- which is how a test
-    # reset one org's policy and then enrolled into a different one. There
-    # is one org in a real demo, so this only ever bites in a suite that
-    # makes a second; that is exactly when a wrong answer is hardest to see.
-    row = conn.execute("SELECT id FROM orgs ORDER BY rowid LIMIT 1").fetchone()
-    if row:
-        return row["id"]
-    org_id = seed_demo_org(conn, name, password)
-    log.info("seeded demo org id=%s", org_id)
-    return org_id
 
 
 from app.routes import admin as _admin  # noqa: E402  (import after `app` exists)

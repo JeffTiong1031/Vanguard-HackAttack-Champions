@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
-from app.main import app, bootstrap_demo, get_conn
+from app.main import app, get_conn
+from app.seed import seed_company
 from app.security import now_iso
 
 client = TestClient(app)
@@ -10,7 +11,7 @@ SECRET = "Ahmad bin Ali 880101-14-5566"
 def _enrolled_pseudo_id() -> str:
     import uuid
     from app.security import new_token
-    org_id = bootstrap_demo()
+    org_id, _ = seed_company(get_conn(), "Acme Corp")
     plain, hashed = new_token("ENG")
     get_conn().execute(
         "INSERT INTO enroll_tokens (id, org_id, department, token_hash, label, created_at)"
