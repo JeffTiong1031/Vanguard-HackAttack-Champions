@@ -26,6 +26,7 @@ import uuid
 
 from fastapi import APIRouter, Body, Cookie, HTTPException, Response
 
+from app.analytics import analytics_summary, analytics_alerts
 from app.authz import require_company
 from app.db import bump_policy_version
 from app.deps import get_conn
@@ -218,3 +219,23 @@ async def usage(vg_admin: str | None = Cookie(default=None)) -> dict[str, list[d
         (org_id,),
     )]
     return {"by_department": by_department, "by_tool": by_tool, "by_category": by_category}
+
+
+def _days(days: int) -> int:
+    return 30 if int(days) == 30 else 7
+
+
+@router.get("/analytics/summary")
+async def admin_analytics_summary(
+    days: int = 7, vg_admin: str | None = Cookie(default=None)
+) -> dict:
+    org_id = require_company(vg_admin)
+    return analytics_summary(get_conn(), org_id, _days(days), None)
+
+
+@router.get("/analytics/alerts")
+async def admin_analytics_alerts(
+    limit: int = 50, vg_admin: str | None = Cookie(default=None)
+) -> list[dict]:
+    org_id = require_company(vg_admin)
+    return analytics_alerts(get_conn(), org_id, min(max(int(limit), 1), 200), None)
