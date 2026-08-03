@@ -46,11 +46,7 @@ def sniff_format(filename: str, data: bytes) -> str:
             if "word/document.xml" in names:
                 return "docx"
             if any(n.startswith("xl/") for n in names):
-                raise SafetyError(
-                    ErrorCode.UNSUPPORTED_TYPE,
-                    "Excel files aren't checked yet. Please paste the relevant "
-                    "rows into the chat instead, or export them as CSV.",
-                )
+                return "xlsx"
             if any(n.startswith("ppt/") for n in names):
                 raise SafetyError(
                     ErrorCode.UNSUPPORTED_TYPE,
@@ -69,7 +65,7 @@ def sniff_format(filename: str, data: bytes) -> str:
         return "txt"
     raise SafetyError(
         ErrorCode.UNSUPPORTED_TYPE,
-        "Vanguard can check .txt, .csv, .docx and text-based .pdf files. "
+        "Vanguard can check .txt, .csv, .docx, .xlsx and text-based .pdf files. "
         "This one isn't one of those, so it was not sent to the AI.",
     )
 

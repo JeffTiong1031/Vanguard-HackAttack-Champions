@@ -43,11 +43,15 @@ const COLD_HASH = '\0cold';
 // (estimate) team-test value; U6-b still measures the real curve later.
 const L2_TIMEOUT_MS = 120_000;
 
+import { setupKeepAliveClient } from '../src/util/keepalive';
+
 export default defineContentScript({
   matches: ['https://chatgpt.com/*', 'https://claude.ai/*'],
   runAt: 'document_start',
   world: 'ISOLATED',
   main() {
+    setupKeepAliveClient();
+
     const adapter = pickAdapter(location.hostname);
     if (!adapter) return;
 
