@@ -82,6 +82,59 @@ async def logout(response: Response, vg_admin: str | None = Cookie(default=None)
     return {"ok": True}
 
 
+@router.get("/departments")
+async def list_departments(vg_admin: str | None = Cookie(default=None)) -> list[dict]:
+    org_id = require_company(vg_admin)
+    return [dict(r) for r in get_conn().execute(
+        "SELECT d.id, d.name, d.created_at,"
+        " (SELECT COUNT(*) FROM enroll_tokens t"
+        "    WHERE t.department_id = d.id AND t.revoked = 0) AS active_tokens"
+        " FROM departments d WHERE d.org_id = ? ORDER BY d.created_at DESC",
+        (org_id,),
+    )]
+
+
+@router.post("/departments", status_code=201)
+async def create_department_route(
+    name: str = Body(embed=True), vg_admin: str | None = Cookie(default=None),
+) -> dict[str, str]:
+    org_id = require_company(vg_admin)
+    conn = get_conn()
+    if conn.execute(
+        "SELECT 1 FROM departments WHERE org_id = ? AND name = ?", (org_id, name)
+    ).fetchone():
+        raise HTTPException(status_code=409, detail="department already exists")
+    dept_id = uuid.uuid4().hex
+    plain, hashed = new_token(name[:3])
+    conn.execute(
+        "INSERT INTO departments (id, org_id, name, admin_token_hash, created_at)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (dept_id, org_id, name, hashed, now_iso()),
+    )
+    conn.commit()
+    # departments is never read by read_policy() -- no version bump.
+    return {"id": dept_id, "name": name, "secret": plain}
+
+
+@router.post("/departments/{dept_id}/regenerate")
+async def regenerate_department(
+    dept_id: str, vg_admin: str | None = Cookie(default=None),
+) -> dict[str, str]:
+    org_id = require_company(vg_admin)
+    conn = get_conn()
+    plain, hashed = new_token("DEP")
+    cur = conn.execute(
+        "UPDATE departments SET admin_token_hash = ? WHERE id = ? AND org_id = ?",
+        (hashed, dept_id, org_id),
+    )
+    if cur.rowcount == 0:
+        raise HTTPException(status_code=404, detail="unknown department")
+    # Old secret is now dead; also drop any live sessions opened with it.
+    conn.execute("DELETE FROM admin_sessions WHERE department_id = ?", (dept_id,))
+    conn.commit()
+    return {"id": dept_id, "secret": plain}
+
+
 @router.get("/tools")
 async def list_tools(vg_admin: str | None = Cookie(default=None)) -> list[dict]:
     org_id = _require_admin(vg_admin)
