@@ -58,6 +58,39 @@ export function recommendationFor(finding: Finding, numbering: SessionNumbering)
   return numbering.placeholderFor(finding.cls, finding.text);
 }
 
+export type HintPopoverSize = { width: number; height: number };
+
+/**
+ * Place the typing hint inside the viewport. A mark in the lower half opens
+ * upward (the normal bottom-docked chat composer); a mark in the upper half
+ * opens downward. If the preferred side cannot fit, use the other side. Both
+ * axes are clamped for narrow windows and browser zoom.
+ */
+export function placeHintPopover(
+  anchor: Pick<DOMRect, 'top' | 'bottom' | 'left'>,
+  size: HintPopoverSize,
+  viewportWidth: number,
+  viewportHeight: number,
+  gap = 8,
+  margin = 8,
+): { top: number; left: number; placement: 'above' | 'below' } {
+  const maxLeft = Math.max(margin, viewportWidth - size.width - margin);
+  const left = Math.min(Math.max(margin, anchor.left), maxLeft);
+  const belowTop = anchor.bottom + gap;
+  const aboveTop = anchor.top - gap - size.height;
+  const fitsBelow = belowTop + size.height <= viewportHeight - margin;
+  const fitsAbove = aboveTop >= margin;
+  const prefersAbove = (anchor.top + anchor.bottom) / 2 > viewportHeight / 2;
+  let placement: 'above' | 'below';
+  if (prefersAbove) placement = fitsAbove || !fitsBelow ? 'above' : 'below';
+  else placement = fitsBelow || !fitsAbove ? 'below' : 'above';
+  const desiredTop = placement === 'below' ? belowTop : aboveTop;
+  const maxTop = Math.max(margin, viewportHeight - size.height - margin);
+  const top = Math.min(Math.max(margin, desiredTop), maxTop);
+
+  return { top, left, placement };
+}
+
 /** Map adapter-text offsets onto composer textContent (handles ZWSP drift). */
 export function locateInDom(
   content: string,

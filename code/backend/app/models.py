@@ -37,7 +37,7 @@ class ExtractResponse(BaseModel):
     extract_sha256: str
     chars: int
     truncated: bool
-    format: Literal["txt", "csv", "docx", "pdf", "xlsx"]
+    format: Literal["txt", "csv", "docx", "pdf", "xlsx", "image"]
     coverage: Coverage
     warnings: list[str] = Field(default_factory=list)
 

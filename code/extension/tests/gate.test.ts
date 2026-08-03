@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { decideGate, installGate, isVanguardUiPath } from '../src/gate/gate';
 import { VerdictCache } from '../src/detection/verdict-cache';
+import { chatgptAdapter } from '../src/adapters/chatgpt';
 
 describe('isVanguardUiPath', () => {
   it('is true when a path node carries data-vanguard-ui', () => {
@@ -58,6 +59,7 @@ describe('installGate', () => {
   const addEventListener = vi.fn();
 
   beforeEach(() => {
+    document.body.innerHTML = '';
     vi.stubGlobal('window', { addEventListener });
     addEventListener.mockClear();
   });
@@ -66,7 +68,7 @@ describe('installGate', () => {
     vi.unstubAllGlobals();
   });
 
-  it('registers keydown and click listeners at window capture phase', () => {
+  it('registers keydown, click, and submit listeners at window capture phase', () => {
     installGate({
       cache: new VerdictCache(),
       getComposerText: () => null,
@@ -76,11 +78,14 @@ describe('installGate', () => {
       onBlocked: () => {},
     });
 
-    expect(addEventListener).toHaveBeenCalledTimes(2);
+    expect(addEventListener).toHaveBeenCalledTimes(3);
     expect(addEventListener).toHaveBeenCalledWith('keydown', expect.any(Function), {
       capture: true,
     });
     expect(addEventListener).toHaveBeenCalledWith('click', expect.any(Function), {
+      capture: true,
+    });
+    expect(addEventListener).toHaveBeenCalledWith('submit', expect.any(Function), {
       capture: true,
     });
   });
@@ -113,5 +118,83 @@ describe('installGate', () => {
     keydown(e);
     expect(isSendIntent).not.toHaveBeenCalled();
     expect(onBlocked).not.toHaveBeenCalled();
+  });
+
+  it('blocks sensitive text submitted from a previously answered prompt edit', () => {
+    document.body.innerHTML = `
+      <div id="prompt-textarea" contenteditable="true">clean new prompt</div>
+      <form id="edit-form">
+        <textarea>NRIC 000203-06-0283</textarea>
+        <button type="button">Save &amp; Submit</button>
+      </form>
+    `;
+    const form = document.querySelector<HTMLElement>('#edit-form')!;
+    const button = form.querySelector<HTMLButtonElement>('button')!;
+    const cache = new VerdictCache();
+    cache.setClean('clean-hash', []);
+    cache.setDirty('edit-hash', [{ cls: 'NRIC', start: 5, end: 19, text: '000203-06-0283' }]);
+    const onBlocked = vi.fn();
+
+    installGate({
+      cache,
+      getComposerText: (path) => chatgptAdapter.readText(path),
+      isSendIntent: (_event, path) => chatgptAdapter.isSendControl(path),
+      hashOf: (text) => text.startsWith('NRIC') ? 'edit-hash' : 'clean-hash',
+      approvedHash: () => null,
+      onBlocked,
+    });
+    const click = addEventListener.mock.calls.find((c) => c[0] === 'click')![1] as (
+      e: Event,
+    ) => void;
+    const event = {
+      eventPhase: Event.CAPTURING_PHASE,
+      composedPath: () => [button, form, document.body],
+      stopImmediatePropagation: vi.fn(),
+      preventDefault: vi.fn(),
+    } as unknown as MouseEvent;
+
+    click(event);
+
+    expect(event.stopImmediatePropagation).toHaveBeenCalledOnce();
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(onBlocked).toHaveBeenCalledWith('NRIC 000203-06-0283');
+  });
+
+  it('blocks a native edit-form submit even when its button is not recognisable', () => {
+    document.body.innerHTML = `
+      <div id="prompt-textarea" contenteditable="true">clean new prompt</div>
+      <form id="edit-form">
+        <div contenteditable="plaintext-only" role="textbox">alice@example.com</div>
+        <button type="submit"><svg aria-hidden="true"></svg></button>
+      </form>
+    `;
+    const form = document.querySelector<HTMLElement>('#edit-form')!;
+    const cache = new VerdictCache();
+    cache.setDirty('edit-hash', [{ cls: 'EMAIL', start: 0, end: 17, text: 'alice@example.com' }]);
+    const onBlocked = vi.fn();
+
+    installGate({
+      cache,
+      getComposerText: (path) => chatgptAdapter.readText(path),
+      isSendIntent: (event) => event.type === 'submit',
+      hashOf: () => 'edit-hash',
+      approvedHash: () => null,
+      onBlocked,
+    });
+    const submit = addEventListener.mock.calls.find((c) => c[0] === 'submit')![1] as (
+      e: Event,
+    ) => void;
+    const event = {
+      type: 'submit',
+      eventPhase: Event.CAPTURING_PHASE,
+      composedPath: () => [form, document.body],
+      stopImmediatePropagation: vi.fn(),
+      preventDefault: vi.fn(),
+    } as unknown as SubmitEvent;
+
+    submit(event);
+
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(onBlocked).toHaveBeenCalledWith('alice@example.com');
   });
 });
