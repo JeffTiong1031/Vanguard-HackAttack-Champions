@@ -11,9 +11,14 @@ def test_sniff_prefers_magic_bytes_over_the_filename():
     assert sniff_format("payroll.docx", b"%PDF-1.7\n...") == "pdf"
 
 
+def test_sniff_accepts_image_types():
+    assert sniff_format("photo.jpg", b"\xff\xd8\xff\xe0blah") == "image"
+    assert sniff_format("graphic.png", b"\x89PNG\r\n\x1a\n...") == "image"
+
+
 def test_sniff_rejects_an_unsupported_type():
     with pytest.raises(SafetyError) as e:
-        sniff_format("photo.jpg", b"\xff\xd8\xff\xe0blah")
+        sniff_format("program.exe", b"MZ\x90\x00...")
     assert e.value.code == ErrorCode.UNSUPPORTED_TYPE
 
 

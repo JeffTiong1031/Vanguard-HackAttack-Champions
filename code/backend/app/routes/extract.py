@@ -10,6 +10,7 @@ from app.auth import check_bearer
 from app.models import Coverage, ErrorCode, ErrorResponse, ExtractResponse, RedactRequest, RedactSpan
 from app.parsers.docx import parse_docx
 from app.parsers.excel import parse_excel
+from app.parsers.image import parse_image
 from app.parsers.pdf import parse_pdf
 from app.parsers.text import parse_text, truncate
 from app.redact.docx import redact_docx
@@ -97,6 +98,8 @@ async def extract(request: Request) -> JSONResponse:
             text, coverage, warnings, _nodes = run_with_timeout(
                 parse_pdf, body, limits.PARSE_TIMEOUT_SECONDS
             )
+        elif kind == "image":
+            text, coverage, warnings, _nodes = parse_image(filename, body)
         else:
             text, coverage, warnings, _nodes = parse_text(filename, body)
     except SafetyError as err:

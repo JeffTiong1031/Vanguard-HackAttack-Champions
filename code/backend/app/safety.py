@@ -20,6 +20,11 @@ class SafetyError(Exception):
 _MAGIC: list[tuple[bytes, str]] = [
     (b"%PDF-", "pdf"),
     (b"PK\x03\x04", "zip"),   # OOXML container; refined below
+    (b"\x89PNG\r\n\x1a\n", "image"),
+    (b"\xff\xd8\xff", "image"),
+    (b"BM", "image"),
+    (b"II*\x00", "image"),
+    (b"MM\x00*", "image"),
 ]
 
 
@@ -29,7 +34,10 @@ def sniff_format(filename: str, data: bytes) -> str:
     A renamed file is the cheapest attack there is, and trusting the
     extension is how a PDF parser gets handed a ZIP.
     """
-    head = data[:8]
+    head = data[:12]
+    if head.startswith(b"RIFF") and b"WEBP" in head:
+        return "image"
+
     for magic, kind in _MAGIC:
         if head.startswith(magic):
             if kind != "zip":
@@ -63,9 +71,11 @@ def sniff_format(filename: str, data: bytes) -> str:
         return "csv"
     if lowered.endswith((".txt", ".md", ".log")):
         return "txt"
+    if lowered.endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff")):
+        return "image"
     raise SafetyError(
         ErrorCode.UNSUPPORTED_TYPE,
-        "Vanguard can check .txt, .csv, .docx, .xlsx and text-based .pdf files. "
+        "Vanguard can check .txt, .csv, .docx, .xlsx, images (.png, .jpg, .webp) and .pdf files. "
         "This one isn't one of those, so it was not sent to the AI.",
     )
 

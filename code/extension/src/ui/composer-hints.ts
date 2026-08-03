@@ -4,6 +4,7 @@ import {
   applyOneFinding,
   findingKey,
   locateInDom,
+  placeHintPopover,
   pruneDismissed,
   rangeFromOffsets,
   recommendationFor,
@@ -31,6 +32,8 @@ const STYLE = `
   position: absolute;
   pointer-events: auto;
   width: 300px;
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
   background: #fff;
   color: #0f172a;
   border: 1px solid #fecdd3;
@@ -195,15 +198,25 @@ export function createComposerHints(deps: ComposerHintsDeps): ComposerHints {
     actions.append(accept, dismiss);
     pop.append(cls, why, rec, actions);
 
-    const top = anchor.bottom + 8;
-    const left = Math.min(anchor.left, window.innerWidth - 300);
-    pop.style.top = `${Math.max(8, top)}px`;
-    pop.style.left = `${Math.max(8, left)}px`;
-
     pop.addEventListener('mouseenter', cancelHide);
     pop.addEventListener('mouseleave', hidePopoverSoon);
 
+    // It must be in the shadow tree before it has a measurable rendered size.
+    // Keep it invisible for that first layout so users never see it jump from
+    // below the composer to its final (usually above) position.
+    pop.style.visibility = 'hidden';
     layer.appendChild(pop);
+    const measured = pop.getBoundingClientRect();
+    const position = placeHintPopover(
+      anchor,
+      { width: measured.width || 300, height: measured.height || 180 },
+      window.innerWidth,
+      window.innerHeight,
+    );
+    pop.style.top = `${position.top}px`;
+    pop.style.left = `${position.left}px`;
+    pop.setAttribute('data-placement', position.placement);
+    pop.style.visibility = 'visible';
 
     for (const mark of layer.querySelectorAll('.mark')) {
       mark.setAttribute('data-active', mark.getAttribute('data-key') === openKey ? '1' : '0');

@@ -46,7 +46,7 @@ export function isVanguardUiFocused(): boolean {
 }
 
 export function installGate(deps: GateDeps): void {
-  const handler = (e: KeyboardEvent | MouseEvent) => {
+  const handler = (e: Event) => {
     if (e.eventPhase !== Event.CAPTURING_PHASE) return;
     if (e instanceof KeyboardEvent && e.isComposing) return; // U12-b: IME commit, not a send
     const path = e.composedPath();
@@ -75,4 +75,8 @@ export function installGate(deps: GateDeps): void {
   };
   window.addEventListener('keydown', handler, { capture: true });
   window.addEventListener('click', handler, { capture: true });
+  // Provider edit UIs may submit a form programmatically after their button
+  // handler. Guard the cancellable submit event too, so DOM/button-label drift
+  // cannot bypass the same text-hash decision.
+  window.addEventListener('submit', handler, { capture: true });
 }

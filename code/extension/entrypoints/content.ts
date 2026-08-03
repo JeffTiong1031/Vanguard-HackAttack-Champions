@@ -125,12 +125,20 @@ export default defineContentScript({
       if (verdict.state === 'DIRTY') await recordFindings(verdict.findings);
     };
     const debouncedScan = debounce((text: string) => void scan(text), 250);
+    // The page can contain two editors at once while an old message is being
+    // edited. Keep the exact editor that caused the blocked send so review,
+    // masking, and focus never jump to the new-message composer.
+    let blockedComposer: HTMLElement | null = null;
 
     installGate({
       cache,
-      getComposerText: (_path) => adapter.readText(),
+      getComposerText: (path) => {
+        blockedComposer = adapter.getComposer(path);
+        return blockedComposer ? adapter.readText([blockedComposer]) : null;
+      },
       isSendIntent: (event, path) =>
         (event instanceof KeyboardEvent && event.key === 'Enter' && !event.shiftKey)
+        || event.type === 'submit'
         || adapter.isSendControl(path),
       hashOf: (text) => hashes.get(text) ?? COLD_HASH,
       approvedHash: () => approvals.currentHash(),
@@ -164,7 +172,7 @@ export default defineContentScript({
               category: ethics.category,
               orgName: 'your organisation',
               promptText: text,
-              onEdit: () => adapter.getComposer()?.focus(),
+              onEdit: () => (blockedComposer ?? adapter.getComposer())?.focus(),
               onRequestReview: (reason, disclosedText) => {
                 void chrome.runtime.sendMessage({
                   kind: 'appeal-submit', decisionType: 'ethics',
@@ -182,7 +190,7 @@ export default defineContentScript({
           if (!promptDirty) {
             approvals.approve(promptHash, 60_000);
             hashes.set(text, promptHash);
-            showReviewApprovedModal(() => adapter.getComposer()?.focus());
+            showReviewApprovedModal(() => (blockedComposer ?? adapter.getComposer())?.focus());
             return;
           }
         }
@@ -266,8 +274,8 @@ export default defineContentScript({
               return;
             }
 
-            adapter.writeText(finalText);
-            const approvedText = adapter.readText() ?? finalText;
+            adapter.writeText(finalText, blockedComposer);
+            const approvedText = adapter.readText(blockedComposer ? [blockedComposer] : undefined) ?? finalText;
             const hash = await sha256Hex(approvedText);
             approvals.approve(hash, 60_000);
             hashes.set(approvedText, hash);
@@ -283,9 +291,10 @@ export default defineContentScript({
     });
 
     let boundComposer: HTMLElement | null = null;
-    const onInput = () => {
+    const onInput = (e?: Event) => {
       approvals.invalidate();
-      const text = adapter.readText();
+      const path = e ? e.composedPath() : undefined;
+      const text = adapter.readText(path);
       if (text) {
         // L1 hints: sync, no L2 (ADR 0024). Gate scan stays debounced.
         hints.update(text);
@@ -294,6 +303,7 @@ export default defineContentScript({
         hints.clear();
       }
     };
+    document.addEventListener('input', (e) => onInput(e), { capture: true });
     const bindComposer = () => {
       const composer = adapter.getComposer();
       if (composer === boundComposer) return;

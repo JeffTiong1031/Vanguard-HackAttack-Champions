@@ -7,9 +7,38 @@ import {
   hintFindings,
   L1_HINT_CLASSES,
   locateInDom,
+  placeHintPopover,
   pruneDismissed,
   visibleHints,
 } from '../src/ui/hint-logic';
+
+describe('placeHintPopover', () => {
+  const size = { width: 300, height: 180 };
+
+  it('places the dropdown below when there is room', () => {
+    expect(placeHintPopover(
+      { top: 100, bottom: 120, left: 200 }, size, 800, 600,
+    )).toEqual({ top: 128, left: 200, placement: 'below' });
+  });
+
+  it('flips above a composer near the bottom of the viewport', () => {
+    expect(placeHintPopover(
+      { top: 540, bottom: 560, left: 200 }, size, 800, 600,
+    )).toEqual({ top: 352, left: 200, placement: 'above' });
+  });
+
+  it('opens above a lower-half composer even when the dropdown could fit below', () => {
+    expect(placeHintPopover(
+      { top: 500, bottom: 520, left: 200 }, { width: 300, height: 100 }, 800, 800,
+    )).toEqual({ top: 392, left: 200, placement: 'above' });
+  });
+
+  it('clamps the dropdown horizontally at browser zoom and narrow edges', () => {
+    expect(placeHintPopover(
+      { top: 100, bottom: 120, left: 590 }, size, 640, 600,
+    )).toEqual({ top: 128, left: 332, placement: 'below' });
+  });
+});
 
 describe('hintFindings', () => {
   it('underlines L1 identifiers and email, never invents PERSON', () => {
