@@ -1,0 +1,49 @@
+import uuid
+from fastapi.testclient import TestClient
+from app.main import app
+from app.deps import get_conn
+from app.seed import seed_company, create_department, mint_employee_token
+
+emp = TestClient(app)
+
+
+def _dept_setup(dept_name="Engineering"):
+    org_id, co_secret = seed_company(get_conn(), "DeptReq " + uuid.uuid4().hex[:6])
+    dept_id, dept_secret = create_department(get_conn(), org_id, dept_name)
+    token = mint_employee_token(get_conn(), org_id, dept_id, dept_name)
+    pseudo = emp.post("/v1/enroll", json={"token": token}).json()["pseudo_id"]
+    dc = TestClient(app)
+    dc.post("/v1/admin/login", json={"role": "department", "secret": dept_secret})
+    return org_id, dept_id, pseudo, dc
+
+
+def test_dept_approval_writes_a_dept_override_not_company_policy():
+    org_id, dept_id, pseudo, dc = _dept_setup()
+    req_id = emp.post("/v1/requests", json={
+        "pseudo_id": pseudo, "llm_id": "google", "reason": "translation"}).json()["id"]
+
+    assert any(r["id"] == req_id for r in dc.get("/v1/dept/requests").json())
+    assert dc.post(f"/v1/dept/requests/{req_id}", json={"decision": "approved"}).status_code == 200
+
+    conn = get_conn()
+    override = conn.execute(
+        "SELECT status FROM dept_llm_policy WHERE department_id = ? AND llm_id = 'google'",
+        (dept_id,)).fetchone()
+    assert override["status"] == "approved"
+    company = conn.execute(
+        "SELECT status FROM org_llm_policy WHERE org_id = ? AND llm_id = 'google'",
+        (org_id,)).fetchone()
+    assert company["status"] == "blocked"   # company default untouched
+
+
+def test_dept_a_cannot_see_or_decide_dept_b_requests():
+    org_id, dept_a, pseudo_a, dc_a = _dept_setup("Alpha")
+    # a second department in the SAME company, with its own employee + request
+    dept_b, secret_b = create_department(get_conn(), org_id, "Beta")
+    token_b = mint_employee_token(get_conn(), org_id, dept_b, "Beta")
+    pseudo_b = emp.post("/v1/enroll", json={"token": token_b}).json()["pseudo_id"]
+    req_b = emp.post("/v1/requests", json={
+        "pseudo_id": pseudo_b, "llm_id": "xai", "reason": "probe"}).json()["id"]
+
+    assert all(r["id"] != req_b for r in dc_a.get("/v1/dept/requests").json())
+    assert dc_a.post(f"/v1/dept/requests/{req_b}", json={"decision": "approved"}).status_code == 404
