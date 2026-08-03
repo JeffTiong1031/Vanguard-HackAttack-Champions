@@ -7,7 +7,8 @@ import { Tools } from './screens/Tools';
 import { Departments } from './screens/Departments';
 import { Requests } from './screens/Requests';
 import { Reviews } from './screens/Reviews';
-import { Usage } from './screens/Usage';
+import { AiUsage } from './screens/AiUsage';
+import { InsiderRisk } from './screens/InsiderRisk';
 import { Tokens } from './screens/Tokens';
 import { DeptTools } from './screens/DeptTools';
 import { LayersIcon, ShieldIcon, InboxIcon, BarIcon, KeyIcon, GavelIcon } from './icons';
@@ -86,14 +87,16 @@ function Dashboard({ session, onLogout }: { session: Session; onLogout: () => vo
         ['tools', 'Tools', ShieldIcon, <Tools />],
         ['requests', 'Requests', InboxIcon, <Requests scope="company" />],
         ['reviews', 'Reviews', GavelIcon, <Reviews scope="company" />],
-        ['usage', 'Usage', BarIcon, <Usage scope="company" />],
+        ['usage', 'AI Usage', BarIcon, <AiUsage scope="company" />],
+        ['risk', 'Insider Risk', ShieldIcon, <InsiderRisk scope="company" />],
       ]
     : [
         ['requests', 'Requests', InboxIcon, <Requests scope="department" />],
         ['reviews', 'Reviews', GavelIcon, <Reviews scope="department" />],
         ['tokens', 'Employee Tokens', KeyIcon, <Tokens />],
         ['tools', 'Tools', ShieldIcon, <DeptTools />],
-        ['usage', 'Usage', BarIcon, <Usage scope="department" />],
+        ['usage', 'AI Usage', BarIcon, <AiUsage scope="department" />],
+        ['risk', 'Insider Risk', ShieldIcon, <InsiderRisk scope="department" />],
       ];
   const [active, setActive] = useState(tabs[0][0]);
 
