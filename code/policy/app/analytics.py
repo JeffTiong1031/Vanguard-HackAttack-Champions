@@ -66,3 +66,16 @@ def analytics_summary(conn, org_id: str, days: int, department_id: str | None) -
         "top_employees": top_employees, "top_departments": top_departments,
         "alerts_by_severity": alerts_by_severity, "totals": totals,
     }
+
+
+def analytics_alerts(conn, org_id: str, limit: int, department_id: str | None) -> list[dict]:
+    scope = " AND e.department_id = ?" if department_id else ""
+    params = (org_id,) + ((department_id,) if department_id else ()) + (int(limit),)
+    rows = conn.execute(
+        f"SELECT u.ts AS ts, e.department AS department, {_NAME} AS name, u.host AS host,"
+        f" u.type AS type, u.category AS category, {ACTION_SQL} AS action, {SEVERITY_SQL} AS severity"
+        f" FROM usage_events u JOIN employees e ON e.id = u.employee_id"
+        f" WHERE u.org_id = ?{scope} ORDER BY u.ts DESC LIMIT ?",
+        params,
+    ).fetchall()
+    return [dict(r) for r in rows]
