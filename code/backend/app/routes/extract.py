@@ -9,9 +9,11 @@ from app import limits
 from app.auth import check_bearer
 from app.models import Coverage, ErrorCode, ErrorResponse, ExtractResponse, RedactRequest, RedactSpan
 from app.parsers.docx import parse_docx
+from app.parsers.excel import parse_excel
 from app.parsers.pdf import parse_pdf
 from app.parsers.text import parse_text, truncate
 from app.redact.docx import redact_docx
+from app.redact.excel import redact_excel
 from app.redact.pdf import redact_pdf
 from app.safety import SafetyError, guard_zip, run_with_timeout, sniff_format
 
@@ -86,6 +88,11 @@ async def extract(request: Request) -> JSONResponse:
             text, coverage, warnings, _nodes = run_with_timeout(
                 parse_docx, body, limits.PARSE_TIMEOUT_SECONDS
             )
+        elif kind == "xlsx":
+            guard_zip(body)
+            text, coverage, warnings, _nodes = run_with_timeout(
+                parse_excel, body, limits.PARSE_TIMEOUT_SECONDS
+            )
         elif kind == "pdf":
             text, coverage, warnings, _nodes = run_with_timeout(
                 parse_pdf, body, limits.PARSE_TIMEOUT_SECONDS
@@ -115,7 +122,7 @@ async def extract(request: Request) -> JSONResponse:
             extract_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
             chars=len(text),
             truncated=was_truncated,
-            format="csv" if kind == "csv" else kind,
+            format=kind,
             coverage=coverage if isinstance(coverage, Coverage) else Coverage(**coverage),
             warnings=warnings,
         ).model_dump(mode="json"),
@@ -123,32 +130,38 @@ async def extract(request: Request) -> JSONResponse:
 
 
 def _split_multipart(raw: bytes) -> tuple[bytes, str | None]:
-    """Minimal multipart/form-data extraction of the single `file` part.
+    """Split a simple single-file multipart/form-data payload without disk spooling.
 
-    A full parser is not needed for a one-field form, and avoiding
-    python-multipart's UploadFile keeps the spool-to-disk path closed.
+     Starlette's `python-multipart` parser writes large parts to temporary files on disk.
+     To enforce zero-retention (F4), we parse the boundary in-memory.
     """
     if not raw.startswith(b"--"):
         return raw, None
-    boundary = raw.split(b"\r\n", 1)[0]
+
+    first_line_end = raw.find(b"\r\n")
+    if first_line_end < 0:
+        return raw, None
+
+    boundary = raw[:first_line_end]
     parts = raw.split(boundary)
+
     for part in parts:
         head, _, tail = part.partition(b"\r\n\r\n")
-        if b'name="file"' not in head:
-            continue
-        name = None
-        marker = b'filename="'
-        if marker in head:
-            start = head.index(marker) + len(marker)
-            name = head[start : head.index(b'"', start)].decode("utf-8", "replace")
-        return tail.rstrip(b"\r\n-"), name
+        if b'name="file"' in head:
+            payload = tail.rstrip(b"\r\n-")
+            marker = b'filename="'
+            if marker in head:
+                start = head.index(marker) + len(marker)
+                filename = head[start : head.index(b'"', start)].decode("utf-8", "replace")
+                return payload, filename
+            return payload, None
+
     return raw, None
 
 
-async def _read_multipart_with_spec(request: Request) -> tuple[bytes, str, str]:
-    filename = request.headers.get("x-vanguard-filename", "upload")
-
-    declared = request.headers.get("content-length")
+async def _read_multipart_with_spec(raw_request: Request) -> tuple[bytes, str, str]:
+    """Read a multipart request containing `file` and `spec` fields directly into memory."""
+    declared = raw_request.headers.get("content-length")
     if declared and int(declared) > limits.MAX_UPLOAD_BYTES:
         raise SafetyError(
             ErrorCode.TOO_LARGE,
@@ -157,7 +170,7 @@ async def _read_multipart_with_spec(request: Request) -> tuple[bytes, str, str]:
         )
 
     data = bytearray()
-    async for chunk in request.stream():
+    async for chunk in raw_request.stream():
         data.extend(chunk)
         if len(data) > limits.MAX_UPLOAD_BYTES + 4096:
             raise SafetyError(
@@ -166,17 +179,17 @@ async def _read_multipart_with_spec(request: Request) -> tuple[bytes, str, str]:
                 "and has not been sent to the AI.",
             )
 
-    body, parsed_name, spec_raw = _parse_multipart_with_spec(bytes(data))
-    if parsed_name:
-        filename = parsed_name
-    return body, filename, spec_raw
+    raw = bytes(data)
+    filename = raw_request.headers.get("x-vanguard-filename", "upload")
 
-
-def _parse_multipart_with_spec(raw: bytes) -> tuple[bytes, str | None, str]:
     if not raw.startswith(b"--"):
-        return raw, None, "{}"
+        return raw, filename, "{}"
 
-    boundary = raw.split(b"\r\n", 1)[0]
+    first_line_end = raw.find(b"\r\n")
+    if first_line_end < 0:
+        return raw, filename, "{}"
+
+    boundary = raw[:first_line_end]
     parts = raw.split(boundary)
     file_body = raw
     file_name: str | None = None
@@ -194,7 +207,7 @@ def _parse_multipart_with_spec(raw: bytes) -> tuple[bytes, str | None, str]:
         elif b'name="spec"' in head:
             spec_raw = payload.decode("utf-8", errors="replace")
 
-    return file_body, file_name, spec_raw
+    return file_body, file_name or filename, spec_raw
 
 
 @router.post("/v1/redact")
@@ -219,6 +232,9 @@ async def redact(request: Request) -> Response:
         if kind == "docx":
             guard_zip(body)
             text, _, _, nodes = run_with_timeout(parse_docx, body, limits.PARSE_TIMEOUT_SECONDS)
+        elif kind == "xlsx":
+            guard_zip(body)
+            text, _, _, nodes = run_with_timeout(parse_excel, body, limits.PARSE_TIMEOUT_SECONDS)
         elif kind == "pdf":
             text, _, _, nodes = run_with_timeout(parse_pdf, body, limits.PARSE_TIMEOUT_SECONDS)
         else:
@@ -244,6 +260,9 @@ async def redact(request: Request) -> Response:
         if kind == "docx":
             payload = redact_docx(body, spec.spans, nodes)
             media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        elif kind == "xlsx":
+            payload = redact_excel(body, spec.spans, nodes)
+            media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         elif kind == "pdf":
             payload = redact_pdf(body, spec.spans)
             media = "application/pdf"

@@ -24,11 +24,15 @@ function emit(event: GovernanceEvent): void {
   void ask({ kind: 'policy-event', event });
 }
 
+import { setupKeepAliveClient } from '../src/util/keepalive';
+
 export default defineContentScript({
   matches: REGISTRY_MATCHES,
   runAt: 'document_idle',
   world: 'ISOLATED',
   main() {
+    setupKeepAliveClient();
+
     let shownFor: string | null = null;   // llm_id the banner is currently up for
     let dismissed = false;                // per page load; a reload warns again
     let reportedVisit = false;
