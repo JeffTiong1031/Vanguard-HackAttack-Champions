@@ -155,3 +155,43 @@ async def dept_revoke_token(
     )
     conn.commit()
     return {"ok": True}
+
+
+@router.get("/tools")
+async def dept_tools(vg_admin: str | None = Cookie(default=None)) -> list[dict]:
+    org_id, dept_id = require_department(vg_admin)
+    return [dict(r) for r in get_conn().execute(
+        "SELECT r.id AS llm_id, r.host, r.display_name,"
+        "       COALESCE(dp.status, cp.status) AS status"
+        " FROM llm_registry r"
+        " JOIN org_llm_policy cp ON cp.llm_id = r.id AND cp.org_id = ?"
+        " LEFT JOIN dept_llm_policy dp ON dp.llm_id = r.id AND dp.department_id = ?"
+        " ORDER BY r.display_name",
+        (org_id, dept_id),
+    )]
+
+
+@router.get("/usage")
+async def dept_usage(vg_admin: str | None = Cookie(default=None)) -> dict[str, list[dict]]:
+    org_id, dept_id = require_department(vg_admin)
+    conn = get_conn()
+    by_department = [dict(r) for r in conn.execute(
+        "SELECT e.department, COUNT(*) AS events"
+        " FROM usage_events u JOIN employees e ON e.id = u.employee_id"
+        " WHERE u.org_id = ? AND e.department_id = ? GROUP BY e.department",
+        (org_id, dept_id),
+    )]
+    by_tool = [dict(r) for r in conn.execute(
+        "SELECT u.host, COUNT(*) AS events"
+        " FROM usage_events u JOIN employees e ON e.id = u.employee_id"
+        " WHERE u.org_id = ? AND e.department_id = ? GROUP BY u.host ORDER BY events DESC",
+        (org_id, dept_id),
+    )]
+    by_category = [dict(r) for r in conn.execute(
+        "SELECT u.category, COUNT(*) AS events"
+        " FROM usage_events u JOIN employees e ON e.id = u.employee_id"
+        " WHERE u.org_id = ? AND e.department_id = ? AND u.category IS NOT NULL"
+        " GROUP BY u.category ORDER BY events DESC",
+        (org_id, dept_id),
+    )]
+    return {"by_department": by_department, "by_tool": by_tool, "by_category": by_category}

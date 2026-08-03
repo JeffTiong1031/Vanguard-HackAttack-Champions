@@ -19,7 +19,7 @@ async def enroll(body: EnrollRequest) -> EnrollResponse:
     """
     conn = get_conn()
     row = conn.execute(
-        "SELECT org_id, department FROM enroll_tokens"
+        "SELECT org_id, department, department_id FROM enroll_tokens"
         " WHERE token_hash = ? AND revoked = 0",
         (hash_token(body.token),),
     ).fetchone()
@@ -30,14 +30,14 @@ async def enroll(body: EnrollRequest) -> EnrollResponse:
     employee_id = uuid.uuid4().hex
     pseudo_id = uuid.uuid4().hex
     conn.execute(
-        "INSERT INTO employees (id, org_id, pseudo_id, department, created_at)"
-        " VALUES (?, ?, ?, ?, ?)",
-        (employee_id, row["org_id"], pseudo_id, row["department"], now_iso()),
+        "INSERT INTO employees (id, org_id, pseudo_id, department, department_id, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        (employee_id, row["org_id"], pseudo_id, row["department"], row["department_id"], now_iso()),
     )
     conn.commit()
 
-    policy = read_policy(conn, row["org_id"])
+    policy = read_policy(conn, row["org_id"], row["department_id"])
     return EnrollResponse(
         org_id=row["org_id"], org_name=policy.org_name, pseudo_id=pseudo_id,
-        department=row["department"], policy=policy,
+        department=row["department"], department_id=row["department_id"], policy=policy,
     )
