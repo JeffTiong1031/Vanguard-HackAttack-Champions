@@ -71,3 +71,43 @@ async def dept_decide_request(
         return {"version": bump_policy_version(conn, org_id)}
     conn.commit()
     return {"version": _current_version(conn, org_id)}
+
+
+@router.get("/appeals")
+async def dept_appeals(vg_admin: str | None = Cookie(default=None)) -> list[dict]:
+    org_id, dept_id = require_department(vg_admin)
+    return [dict(r) for r in get_conn().execute(
+        "SELECT a.id, a.decision_type, a.category, a.employee_reason, a.disclosed_text,"
+        "       a.status, a.admin_note, a.created_at, e.department"
+        " FROM decision_appeals a JOIN employees e ON e.id = a.employee_id"
+        " WHERE a.org_id = ? AND e.department_id = ? ORDER BY a.created_at DESC",
+        (org_id, dept_id),
+    )]
+
+
+@router.post("/appeals/{appeal_id}")
+async def dept_decide_appeal(
+    appeal_id: str, body: AppealDecision,
+    vg_admin: str | None = Cookie(default=None),
+) -> dict[str, str]:
+    org_id, dept_id = require_department(vg_admin)
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT 1 FROM decision_appeals a JOIN employees e ON e.id = a.employee_id"
+        " WHERE a.id = ? AND a.org_id = ? AND e.department_id = ? AND a.status = 'pending'",
+        (appeal_id, org_id, dept_id),
+    ).fetchone()
+    if row is None:
+        exists = conn.execute(
+            "SELECT 1 FROM decision_appeals a JOIN employees e ON e.id = a.employee_id"
+            " WHERE a.id = ? AND a.org_id = ? AND e.department_id = ?",
+            (appeal_id, org_id, dept_id),
+        ).fetchone()
+        raise HTTPException(status_code=404 if exists is None else 409,
+                            detail="unknown appeal" if exists is None else "appeal already decided")
+    conn.execute(
+        "UPDATE decision_appeals SET status = ?, admin_note = ?, decided_at = ? WHERE id = ?",
+        (body.decision, body.note, now_iso(), appeal_id),
+    )
+    conn.commit()
+    return {"status": body.decision}
