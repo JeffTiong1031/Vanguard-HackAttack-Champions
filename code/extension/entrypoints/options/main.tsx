@@ -67,8 +67,9 @@ function Organisation() {
     <section>
       <h2 style="font-size:16px">Organisation</h2>
       <p style="color:#475569">
-        Paste the enrolment token your admin gave you. It identifies your department,
-        not you — Vanguard never stores your name or email address.
+        Paste the enrolment token your admin gave you. Vanguard never collects your name,
+        email, or prompt text. Your organisation may label your enrolment with your name
+        for its own records.
       </p>
       <input
         value={base}
