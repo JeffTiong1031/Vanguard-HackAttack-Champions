@@ -7,6 +7,8 @@ is shown once and stored only as a hash. This file is git-ignored; each machine
 regenerates its own set by running this script.
 """
 import sys
+import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -27,6 +29,38 @@ def build_demo_world(company: str = "Acme Corp", out_path: Path = DEFAULT_OUT) -
         dept_id, dept_secret = create_department(conn, org_id, name)
         tokens = [mint_employee_token(conn, org_id, dept_id, name) for _ in range(TOKENS_PER_DEPT)]
         depts.append({"id": dept_id, "name": name, "secret": dept_secret, "tokens": tokens})
+
+    from app.security import hash_token  # local import: keep module top clean
+    NAMES = {
+        "Engineering": ["Alice Tan", "Ben Lee"],
+        "Sales": ["Carol Ng", "Devi Rao"],
+        "Compliance": ["Ethan Ho", "Farah Idris"],
+    }
+    EVENTS = ["pii_block", "ethics_block", "warn_shown", "visit_unapproved", "request_sent"]
+    HOSTS = ["chatgpt.com", "claude.ai", "gemini.google.com"]
+    for d in depts:
+        names = NAMES.get(d["name"], ["Sam Roe", "Kim Yeo"])
+        for i, tok in enumerate(d["tokens"]):
+            # label the token, then enrol a pseudonymous employee that inherits the name
+            person = names[i % len(names)]
+            conn.execute("UPDATE enroll_tokens SET name = ? WHERE token_hash = ?",
+                         (person, hash_token(tok)))
+            emp_id, pseudo = uuid.uuid4().hex, uuid.uuid4().hex
+            conn.execute(
+                "INSERT INTO employees (id, org_id, pseudo_id, department, department_id, name, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (emp_id, org_id, pseudo, d["name"], d["id"], person,
+                 datetime.now(timezone.utc).isoformat()))
+            # spread events across the last ~20 days and the event types
+            for k in range(6):
+                ts = (datetime.now(timezone.utc) - timedelta(days=(k * 3) % 20, hours=k)).isoformat()
+                etype = EVENTS[(i + k) % len(EVENTS)]
+                conn.execute(
+                    "INSERT INTO usage_events (id, org_id, employee_id, host, type, category, finding_hash, ts)"
+                    " VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
+                    (uuid.uuid4().hex, org_id, emp_id, HOSTS[k % len(HOSTS)], etype,
+                     "covert_surveillance" if etype == "ethics_block" else None, ts))
+    conn.commit()
 
     lines = [
         f"# Demo credentials — {company}", "",
