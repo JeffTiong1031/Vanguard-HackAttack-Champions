@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { api, UnauthorisedError, type AppealRow } from '../api';
+import { api, UnauthorisedError, type AppealRow, type Scope } from '../api';
 import { GavelIcon } from '../icons';
 
-export function Reviews() {
+export function Reviews({ scope }: { scope: Scope }) {
+  const base = scope === 'company' ? '/v1/admin/appeals' : '/v1/dept/appeals';
+  const readOnly = scope === 'company';
   const [rows, setRows] = useState<AppealRow[]>([]);
   const [busyId, setBusyId] = useState('');
   const [error, setError] = useState('');
@@ -12,7 +14,7 @@ export function Reviews() {
   async function load() {
     const mine = ++seq.current;
     try {
-      const data = await api.get<AppealRow[]>('/v1/admin/appeals');
+      const data = await api.get<AppealRow[]>(base);
       if (mine !== seq.current) return;
       setRows(data); setError('');
     } catch (err) {
@@ -25,12 +27,12 @@ export function Reviews() {
     void load();
     const t = setInterval(() => { void load(); }, 3000);
     return () => clearInterval(t);
-  }, []);
+  }, [base]);
 
   async function decide(id: string, decision: 'upheld' | 'overturned') {
     setBusyId(id); setError('');
     try {
-      await api.post(`/v1/admin/appeals/${id}`, { decision, note: notes[id]?.trim() || undefined });
+      await api.post(`${base}/${id}`, { decision, note: notes[id]?.trim() || undefined });
       await load();
     } catch (err) {
       if (err instanceof UnauthorisedError) throw err;
@@ -66,7 +68,7 @@ export function Reviews() {
                   ? <code title="the employee chose to share this">{r.disclosed_text}</code>
                   : <span style="color:#94a3b8">not shared</span>}</td>
                 <td>
-                  {r.status === 'pending' ? (
+                  {r.status === 'pending' && !readOnly ? (
                     <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
                       <input
                         placeholder="Note to the employee (optional)"

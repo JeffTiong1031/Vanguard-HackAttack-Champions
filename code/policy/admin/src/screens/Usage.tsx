@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { api, UnauthorisedError, type Usage as UsageData } from '../api';
+import { api, UnauthorisedError, type Usage as UsageData, type Scope } from '../api';
 import { BarIcon } from '../icons';
 
 function Bars({ title, rows }: { title: string; rows: { label: string; events: number }[] }) {
@@ -21,14 +21,15 @@ function Bars({ title, rows }: { title: string; rows: { label: string; events: n
   );
 }
 
-export function Usage() {
+export function Usage({ scope }: { scope: Scope }) {
+  const url = scope === 'company' ? '/v1/admin/usage' : '/v1/dept/usage';
   const [data, setData] = useState<UsageData | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     async function load() {
       try {
-        const d = await api.get<UsageData>('/v1/admin/usage');
+        const d = await api.get<UsageData>(url);
         setData(d);
         setError('');
       } catch (err) {
@@ -41,7 +42,7 @@ export function Usage() {
     void load();
     const timer = setInterval(() => { void load(); }, 3000); // (estimate)
     return () => clearInterval(timer);
-  }, []);
+  }, [url]);
 
   if (!data) return (
     <section class="panel"><p class="empty">{error || 'Loading…'}</p></section>
