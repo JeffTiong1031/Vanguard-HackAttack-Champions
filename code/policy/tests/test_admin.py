@@ -3,10 +3,18 @@ import uuid
 from fastapi.testclient import TestClient
 
 from app.main import app, bootstrap_demo, get_conn
-from app.seed import seed_demo_org
+from app.seed import seed_demo_org, seed_company, create_department, mint_employee_token
 from app.security import new_token, now_iso
 
 client = TestClient(app)
+
+
+def _company_client() -> tuple[TestClient, str]:
+    """A logged-in COMPANY client and its org_id."""
+    org_id, secret = seed_company(get_conn(), "Acme " + uuid.uuid4().hex[:6])
+    c = TestClient(app)
+    assert c.post("/v1/admin/login", json={"role": "company", "secret": secret}).status_code == 200
+    return c, org_id
 
 
 def _login() -> TestClient:
@@ -27,36 +35,6 @@ def _pseudo_id() -> str:
     )
     get_conn().commit()
     return client.post("/v1/enroll", json={"token": plain}).json()["pseudo_id"]
-
-
-def test_login_with_the_wrong_password_is_401():
-    bootstrap_demo("Acme Corp", "vanguard")
-    r = client.post("/v1/admin/login", json={"org_name": "Acme Corp", "password": "wrong"})
-    assert r.status_code == 401
-
-
-def test_login_nonexistent_org_and_wrong_password_return_same_response():
-    """Both "no such org" and "wrong password" return 401 with an identical
-    body. This prevents user enumeration via timing side-channel: scrypt is
-    deliberately slow, so the absence of hash verification when the org does
-    not exist would make that case measurably faster. By always running the
-    KDF against a dummy hash, both failure modes take the same time."""
-    bootstrap_demo("Acme Corp", "vanguard")
-
-    # Nonexistent org
-    r_missing = client.post("/v1/admin/login", json={
-        "org_name": "Does Not Exist", "password": "any-password"
-    })
-
-    # Existing org, wrong password
-    r_wrong = client.post("/v1/admin/login", json={
-        "org_name": "Acme Corp", "password": "wrong"
-    })
-
-    # Both must return 401 with identical body
-    assert r_missing.status_code == 401
-    assert r_wrong.status_code == 401
-    assert r_missing.json() == r_wrong.json()
 
 
 def test_every_admin_route_refuses_an_unauthenticated_caller():

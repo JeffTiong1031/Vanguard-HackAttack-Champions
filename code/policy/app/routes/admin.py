@@ -25,15 +25,11 @@ import uuid
 
 from fastapi import APIRouter, Body, Cookie, HTTPException, Response
 
+from app.authz import require_company
 from app.db import bump_policy_version
 from app.deps import get_conn
 from app.models import AdminLogin, AppealDecision
-from app.security import hash_password, issue_session, new_token, now_iso, session_org, verify_password
-
-# Compute dummy hash once at import time for timing-side-channel defense in login.
-# Always running the KDF eliminates the timing difference between "no such org" and
-# "wrong password" -- scrypt is deliberately slow, so its absence is itself a signal.
-_DUMMY_HASH = hash_password("dummy")
+from app.security import hash_token, issue_session, new_token, now_iso, session_org
 
 router = APIRouter(prefix="/v1/admin")
 SESSION_COOKIE = "vg_admin"
@@ -49,27 +45,39 @@ def _require_admin(session: str | None) -> str:
 @router.post("/login")
 async def login(body: AdminLogin, response: Response) -> dict[str, str]:
     conn = get_conn()
+    h = hash_token(body.secret)
+    if body.role == "company":
+        row = conn.execute(
+            "SELECT id, name FROM orgs WHERE admin_token_hash = ?", (h,)
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=401, detail="invalid credentials")
+        token = issue_session(conn, row["id"], "company", None)
+        response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax")
+        return {"role": "company", "org_id": row["id"], "org_name": row["name"]}
+    # department
     row = conn.execute(
-        "SELECT id, admin_password_hash FROM orgs WHERE name = ?", (body.org_name,)
+        "SELECT d.id AS dept_id, d.org_id, d.name AS dept_name, o.name AS org_name"
+        " FROM departments d JOIN orgs o ON o.id = d.org_id"
+        " WHERE d.admin_token_hash = ?", (h,)
     ).fetchone()
-    # Always run the KDF, even on a miss. Short-circuiting here would make
-    # "no such org" measurably faster than "wrong password" -- scrypt is
-    # deliberately slow, so the absence of that work is itself a signal.
-    stored = row["admin_password_hash"] if row else _DUMMY_HASH
-    ok = verify_password(body.password, stored)
-    if row is None or not ok:
+    if row is None:
         raise HTTPException(status_code=401, detail="invalid credentials")
-    token = issue_session(conn, row["id"])
+    token = issue_session(conn, row["org_id"], "department", row["dept_id"])
     response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax")
-    return {"org_id": row["id"], "org_name": body.org_name}
+    return {
+        "role": "department", "org_id": row["org_id"], "org_name": row["org_name"],
+        "department_id": row["dept_id"], "department": row["dept_name"],
+    }
 
 
 @router.post("/logout")
 async def logout(response: Response, vg_admin: str | None = Cookie(default=None)) -> dict[str, bool]:
-    _require_admin(vg_admin)
-    conn = get_conn()
-    conn.execute("DELETE FROM admin_sessions WHERE token = ?", (vg_admin,))
-    conn.commit()
+    from app.security import resolve_session
+    if resolve_session(get_conn(), vg_admin) is None:
+        raise HTTPException(status_code=401, detail="session required")
+    get_conn().execute("DELETE FROM admin_sessions WHERE token = ?", (vg_admin,))
+    get_conn().commit()
     response.delete_cookie(SESSION_COOKIE)
     return {"ok": True}
 
