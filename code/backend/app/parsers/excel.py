@@ -41,9 +41,10 @@ def _text_of_part(part_name: str, part: bytes, base: int) -> tuple[str, list[Nod
                 pieces.append(body)
                 cursor += len(body)
             node_index += 1
-        elif node.tag == f"{MAIN_NS}row":
-            pieces.append("\n")
-            cursor += 1
+        elif node.tag in (f"{MAIN_NS}si", f"{MAIN_NS}row", f"{MAIN_NS}comment"):
+            if pieces and not pieces[-1].endswith("\n"):
+                pieces.append("\n")
+                cursor += 1
 
     return "".join(pieces), refs
 
