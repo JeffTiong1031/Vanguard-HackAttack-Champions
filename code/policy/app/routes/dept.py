@@ -117,14 +117,17 @@ async def dept_decide_appeal(
 async def dept_tokens(vg_admin: str | None = Cookie(default=None)) -> list[dict]:
     org_id, dept_id = require_department(vg_admin)
     return [dict(r) for r in get_conn().execute(
-        "SELECT id, department, label, created_at, revoked FROM enroll_tokens"
+        "SELECT id, department, name, label, created_at, revoked FROM enroll_tokens"
         " WHERE org_id = ? AND department_id = ? ORDER BY created_at DESC",
         (org_id, dept_id),
     )]
 
 
 @router.post("/tokens", status_code=201)
-async def dept_mint_token(vg_admin: str | None = Cookie(default=None)) -> dict[str, str]:
+async def dept_mint_token(
+    name: str = Body(default="", embed=True),
+    vg_admin: str | None = Cookie(default=None),
+) -> dict[str, str]:
     org_id, dept_id = require_department(vg_admin)
     conn = get_conn()
     dept_name = conn.execute(
@@ -133,13 +136,13 @@ async def dept_mint_token(vg_admin: str | None = Cookie(default=None)) -> dict[s
     plain, hashed = new_token(dept_name[:3])
     token_id = uuid.uuid4().hex
     conn.execute(
-        "INSERT INTO enroll_tokens (id, org_id, department, department_id, token_hash, label, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (token_id, org_id, dept_name, dept_id, hashed, dept_name, now_iso()),
+        "INSERT INTO enroll_tokens (id, org_id, department, department_id, token_hash, label, name, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (token_id, org_id, dept_name, dept_id, hashed, dept_name, name, now_iso()),
     )
     conn.commit()
     # enroll_tokens is never read by read_policy() -- no version bump.
-    return {"id": token_id, "department": dept_name, "token": plain}
+    return {"id": token_id, "department": dept_name, "name": name, "token": plain}
 
 
 @router.post("/tokens/{token_id}/revoke")
