@@ -100,6 +100,22 @@ describe('refreshPolicy', () => {
     vi.stubGlobal('fetch', async () => new Response('{}', { status: 500 }));
     expect((await refreshPolicy())?.version).toBe(1);
   });
+
+  it('sends department_id when the enrolment has one', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 304 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await chrome.storage.local.set({
+      vg_enrolment: {
+        org_id: 'o1', org_name: 'A', pseudo_id: 'p1', department: 'Eng', department_id: 'dept1',
+      },
+    });
+
+    await refreshPolicy();
+
+    const url = String(fetchMock.mock.calls[0]![0]);
+    expect(url).toContain('org_id=o1');
+    expect(url).toContain('department_id=dept1');
+  });
 });
 
 describe('sendAccessRequest', () => {

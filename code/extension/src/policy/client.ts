@@ -38,6 +38,7 @@ export async function enrol(token: string): Promise<Enrolment> {
   const enrolment: Enrolment = {
     org_id: body.org_id, org_name: body.org_name,
     pseudo_id: body.pseudo_id, department: body.department,
+    department_id: (body as Enrolment).department_id,
   };
   await saveEnrolment(enrolment, body.policy);
   return enrolment;
@@ -56,8 +57,11 @@ export async function refreshPolicy(): Promise<Policy | null> {
   const base = await getPolicyBase();
   const etag = await getEtag();
   try {
+    const deptParam = enrolment.department_id
+      ? `&department_id=${encodeURIComponent(enrolment.department_id)}`
+      : '';
     const response = await timedFetch(
-      `${base}/v1/policy?org_id=${encodeURIComponent(enrolment.org_id)}`,
+      `${base}/v1/policy?org_id=${encodeURIComponent(enrolment.org_id)}${deptParam}`,
       { headers: etag ? { 'If-None-Match': etag } : {} },
     );
     if (response.status === 304) return await getCachedPolicy();

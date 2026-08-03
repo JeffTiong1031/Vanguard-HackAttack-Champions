@@ -23,6 +23,7 @@ export type Enrolment = {
   org_name: string;
   pseudo_id: string;
   department: string;
+  department_id?: string;
 };
 
 export type GovernanceEventType =
