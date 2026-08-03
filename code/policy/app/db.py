@@ -103,11 +103,18 @@ CREATE TABLE IF NOT EXISTS usage_events (
     ts           TEXT NOT NULL
 );
 
+-- department_id is deliberately NOT a `REFERENCES departments(id)` FK, unlike
+-- the other department_id columns in this file: a session is an ephemeral
+-- credential, not a record of the department's existence, and PRAGMA
+-- foreign_keys=ON would otherwise reject a session row the instant a
+-- department is ever removed. (Also required so unit tests can exercise
+-- issue_session()/resolve_session() with a bare placeholder id, decoupled
+-- from a real departments row.)
 CREATE TABLE IF NOT EXISTS admin_sessions (
     token         TEXT PRIMARY KEY,
     org_id        TEXT NOT NULL REFERENCES orgs(id),
     role          TEXT NOT NULL DEFAULT 'company' CHECK (role IN ('company','department')),
-    department_id TEXT REFERENCES departments(id),
+    department_id TEXT,
     created_at    TEXT NOT NULL
 );
 
