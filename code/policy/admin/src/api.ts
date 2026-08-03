@@ -59,7 +59,7 @@ export type Tool = {
   status: 'approved' | 'blocked';
 };
 export type TokenRow = {
-  id: string; department: string; label: string; created_at: string; revoked: number;
+  id: string; department: string; label: string; name?: string; created_at: string; revoked: number;
 };
 export type RequestRow = {
   id: string; reason: string; status: 'pending' | 'approved' | 'denied';
@@ -100,4 +100,28 @@ export type Department = {
   name: string;
   created_at: string;
   active_tokens: number;
+};
+
+export type TrendPoint = { date: string; department: string; events: number };
+export type TimelinePoint = { date: string; high: number; medium: number; low: number };
+export type RiskPoint = { date: string; risk: number };
+export type TopApp = { host: string; events: number };
+export type TopEmployee = { name: string; department: string; events: number; risk: number };
+export type TopDepartment = { department: string; events: number; risk: number };
+export type SeverityCount = { severity: string; count: number };
+
+export type AnalyticsSummary = {
+  usage_trend: TrendPoint[];
+  alerts_timeline: TimelinePoint[];
+  risk_timeline: RiskPoint[];
+  top_apps: TopApp[];
+  top_employees: TopEmployee[];
+  top_departments: TopDepartment[];
+  alerts_by_severity: SeverityCount[];
+  totals: { events: number; active_employees: number; days: number };
+};
+
+export type AlertRow = {
+  ts: string; department: string; name: string; host: string;
+  type: string; category: string | null; action: string; severity: string;
 };
