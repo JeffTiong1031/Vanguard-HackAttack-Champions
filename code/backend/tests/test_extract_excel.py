@@ -34,6 +34,16 @@ def test_excel_reads_shared_strings_and_worksheets():
     assert len(nodes) > 0
 
 
+def test_excel_separates_shared_strings_with_newlines():
+    data = _excel({
+        "xl/workbook.xml": f"<workbook {NS}><sheets><sheet name='Sheet1' sheetId='1'/></sheets></workbook>",
+        "xl/sharedStrings.xml": f"<sst {NS}><si><t>NRIC</t></si><si><t>Name</t></si><si><t>770605-05-0230</t></si><si><t>Tan Seng Kong</t></si></sst>",
+    })
+    extract, _, _, _ = parse_excel(data)
+    lines = [line.strip() for line in extract.splitlines() if line.strip()]
+    assert lines == ["NRIC", "Name", "770605-05-0230", "Tan Seng Kong"]
+
+
 def test_excel_reads_comments():
     data = _excel({
         "xl/workbook.xml": f"<workbook {NS}><sheets><sheet name='Sheet1' sheetId='1'/></sheets></workbook>",
