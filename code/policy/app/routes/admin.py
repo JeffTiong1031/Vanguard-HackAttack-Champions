@@ -1,25 +1,26 @@
-"""Admin API.
+"""Company admin (dashboard) API.
 
 Authority is decided HERE, server-side, on every request. The console is a
 view; it never adjudicates whether its user is an admin. A client-side admin
 check is bypassed with devtools in under a minute and would ship a control
 whose audit trail claims it worked -- doc 00 section 6's worst case.
 
-Every route below except /login calls `_require_admin`, including /logout:
-logout still needs to resolve an org_id to know which session row to delete,
-and a blanket "every admin endpoint" rule is easier to hold to if there is no
-carved-out exception to remember. Login is the one legitimate exception --
-it is how a session is obtained in the first place, so it cannot itself
-require one.
+Every route below except /login calls `require_company` (app/authz.py),
+including /logout. Login is the one legitimate exception -- it is how a
+session is obtained in the first place, so it cannot itself require one.
 
-Policy-version bumps: `POST /tools/{llm_id}` and an *approved* decision on
-`POST /requests/{request_id}` change what `org_llm_policy` holds, which is
-exactly what `GET /v1/policy` serialises -- so both call
-`bump_policy_version`. Minting and revoking enrolment tokens touch
-`enroll_tokens`, a table `read_policy()` never reads, so a currently-enrolled
-extension's view is unchanged either way -- no bump, and said so at each call
-site rather than left to be inferred. A *denied* decision is reasoned through
-at `decide_request` below, not assumed.
+This router is company-scoped and, since the department hierarchy landed,
+oversight-only: it can see every department's tools/usage/requests/appeals
+but it does not decide requests or appeals, and it does not mint employee
+enrolment tokens -- those actions moved to `app/routes/dept.py`, scoped to
+one department at a time. `POST /tools/{llm_id}` is the one write left here,
+because tool approval is a company-wide default, not a department override.
+
+Policy-version bumps: `POST /tools/{llm_id}` changes what `org_llm_policy`
+holds, which is exactly what `GET /v1/policy` serialises -- so it calls
+`bump_policy_version`. Department creation/regeneration touches
+`departments`/`admin_sessions`, tables `read_policy()` never reads, so a
+currently-enrolled extension's view is unchanged either way -- no bump.
 """
 import uuid
 
@@ -28,18 +29,11 @@ from fastapi import APIRouter, Body, Cookie, HTTPException, Response
 from app.authz import require_company
 from app.db import bump_policy_version
 from app.deps import get_conn
-from app.models import AdminLogin, AppealDecision
-from app.security import hash_token, issue_session, new_token, now_iso, session_org
+from app.models import AdminLogin
+from app.security import hash_token, issue_session, new_token, now_iso
 
 router = APIRouter(prefix="/v1/admin")
 SESSION_COOKIE = "vg_admin"
-
-
-def _require_admin(session: str | None) -> str:
-    org_id = session_org(get_conn(), session)
-    if org_id is None:
-        raise HTTPException(status_code=401, detail="admin session required")
-    return org_id
 
 
 @router.post("/login")
@@ -137,7 +131,7 @@ async def regenerate_department(
 
 @router.get("/tools")
 async def list_tools(vg_admin: str | None = Cookie(default=None)) -> list[dict]:
-    org_id = _require_admin(vg_admin)
+    org_id = require_company(vg_admin)
     return [dict(r) for r in get_conn().execute(
         "SELECT r.id AS llm_id, r.host, r.display_name, p.status"
         " FROM llm_registry r JOIN org_llm_policy p ON p.llm_id = r.id"
@@ -152,7 +146,7 @@ async def set_tool(
     status: str = Body(embed=True),
     vg_admin: str | None = Cookie(default=None),
 ) -> dict[str, int]:
-    org_id = _require_admin(vg_admin)
+    org_id = require_company(vg_admin)
     if status not in ("approved", "blocked"):
         raise HTTPException(status_code=422, detail="status must be approved or blocked")
     conn = get_conn()
@@ -170,71 +164,12 @@ async def set_tool(
     return {"version": bump_policy_version(conn, org_id)}
 
 
-@router.get("/tokens")
-async def list_tokens(vg_admin: str | None = Cookie(default=None)) -> list[dict]:
-    """Never returns plaintext. The token is shown once, at mint time."""
-    org_id = _require_admin(vg_admin)
-    return [dict(r) for r in get_conn().execute(
-        "SELECT id, department, label, created_at, revoked FROM enroll_tokens"
-        " WHERE org_id = ? ORDER BY created_at DESC",
-        (org_id,),
-    )]
-
-
-@router.post("/tokens", status_code=201)
-async def mint_token(
-    department: str = Body(embed=True),
-    vg_admin: str | None = Cookie(default=None),
-) -> dict[str, str]:
-    org_id = _require_admin(vg_admin)
-    plain, hashed = new_token(department[:3])
-    token_id = uuid.uuid4().hex
-    conn = get_conn()
-    conn.execute(
-        "INSERT INTO enroll_tokens (id, org_id, department, token_hash, label, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?)",
-        (token_id, org_id, department, hashed, department, now_iso()),
-    )
-    conn.commit()
-    # enroll_tokens is never read by read_policy() -- an already-enrolled
-    # extension's policy view is unaffected. No bump.
-    return {"id": token_id, "department": department, "token": plain}
-
-
-@router.post("/tokens/{token_id}/revoke")
-async def revoke_token(token_id: str, vg_admin: str | None = Cookie(default=None)) -> dict[str, bool]:
-    """Revoke an enrolment token to prevent FUTURE enrolments.
-
-    Revoking a token marks it as revoked in the database, preventing new
-    employees from enrolling with that token. However, this endpoint does NOT
-    deprovisioning employees who already enrolled with the token -- employees
-    are keyed by (org_id, pseudo_id) and have no foreign key back to
-    enroll_tokens, so they continue polling indefinitely.
-
-    For a compliance product where "revoke" typically means cutting off access,
-    this is a gap. A real deprovisioning feature would require:
-    - A per-employee revocation mechanism to mark specific (org_id, pseudo_id)
-      pairs as inactive.
-    - A policy change so polling against a revoked employee returns a distinct
-      status signaling their access is cut.
-
-    For Phase 0 (demo), this limitation is acceptable; it must not be silent.
-    """
-    org_id = _require_admin(vg_admin)
-    conn = get_conn()
-    conn.execute(
-        "UPDATE enroll_tokens SET revoked = 1 WHERE id = ? AND org_id = ?",
-        (token_id, org_id),
-    )
-    conn.commit()
-    # Same reasoning as mint_token: enroll_tokens is outside read_policy()'s
-    # reach, so a currently-enrolled extension sees no difference. No bump.
-    return {"ok": True}
-
-
 @router.get("/requests")
 async def list_requests(vg_admin: str | None = Cookie(default=None)) -> list[dict]:
-    org_id = _require_admin(vg_admin)
+    """Company-wide oversight, read-only. Deciding a request is a department
+    action now (`POST /v1/dept/requests/{request_id}` -- app/routes/dept.py);
+    the company dashboard can see every department's queue but cannot act on it."""
+    org_id = require_company(vg_admin)
     return [dict(r) for r in get_conn().execute(
         "SELECT a.id, a.reason, a.status, a.created_at, e.department,"
         "       r.display_name, r.host, a.llm_id"
@@ -246,62 +181,11 @@ async def list_requests(vg_admin: str | None = Cookie(default=None)) -> list[dic
     )]
 
 
-@router.post("/requests/{request_id}")
-async def decide_request(
-    request_id: str,
-    decision: str = Body(embed=True),
-    vg_admin: str | None = Cookie(default=None),
-) -> dict[str, int]:
-    org_id = _require_admin(vg_admin)
-    if decision not in ("approved", "denied"):
-        raise HTTPException(status_code=422, detail="decision must be approved or denied")
-    conn = get_conn()
-    row = conn.execute(
-        "SELECT llm_id FROM access_requests WHERE id = ? AND org_id = ? AND status = 'pending'",
-        (request_id, org_id),
-    ).fetchone()
-    if row is None:
-        # Distinguish "no such request" (404) from "exists, already decided"
-        # (409) -- the console is a view, so the server must not silently
-        # accept a re-decision the client merely declined to offer. A denied
-        # request re-posted as "approved" must not flip, and a decided
-        # request re-posted with the SAME decision must not double-bump.
-        exists = conn.execute(
-            "SELECT 1 FROM access_requests WHERE id = ? AND org_id = ?",
-            (request_id, org_id),
-        ).fetchone()
-        if exists is None:
-            raise HTTPException(status_code=404, detail="unknown request")
-        raise HTTPException(status_code=409, detail="request already decided")
-
-    conn.execute(
-        "UPDATE access_requests SET status = ?, decided_at = ?"
-        " WHERE id = ? AND org_id = ? AND status = 'pending'",
-        (decision, now_iso(), request_id, org_id),
-    )
-    if decision == "approved":
-        conn.execute(
-            "UPDATE org_llm_policy SET status = 'approved'"
-            " WHERE org_id = ? AND llm_id = ?",
-            (org_id, row["llm_id"]),
-        )
-    conn.commit()
-
-    # A denial never touches org_llm_policy -- read_policy() serves the same
-    # tools/categories body before and after, so the ETag it is keyed on must
-    # not move. Only an approval changes org_llm_policy, so only an approval
-    # bumps. (If a future change lets a denial affect anything read_policy()
-    # serves -- e.g. a per-tool denial counter surfaced to the client -- this
-    # exemption needs to be revisited alongside it.)
-    version = bump_policy_version(conn, org_id) if decision == "approved" else conn.execute(
-        "SELECT policy_version FROM orgs WHERE id = ?", (org_id,)
-    ).fetchone()["policy_version"]
-    return {"version": int(version)}
-
-
 @router.get("/appeals")
 async def list_appeals(vg_admin: str | None = Cookie(default=None)) -> list[dict]:
-    org_id = _require_admin(vg_admin)
+    """Company-wide oversight, read-only -- see `list_requests` above; the
+    decide route is `POST /v1/dept/appeals/{appeal_id}` (app/routes/dept.py)."""
+    org_id = require_company(vg_admin)
     return [dict(r) for r in get_conn().execute(
         "SELECT a.id, a.decision_type, a.category, a.employee_reason, a.disclosed_text,"
         "       a.status, a.admin_note, a.created_at, e.department"
@@ -312,41 +196,9 @@ async def list_appeals(vg_admin: str | None = Cookie(default=None)) -> list[dict
     )]
 
 
-@router.post("/appeals/{appeal_id}")
-async def decide_appeal(
-    appeal_id: str,
-    body: AppealDecision,
-    vg_admin: str | None = Cookie(default=None),
-) -> dict[str, str]:
-    org_id = _require_admin(vg_admin)
-    conn = get_conn()
-    row = conn.execute(
-        "SELECT 1 FROM decision_appeals WHERE id = ? AND org_id = ? AND status = 'pending'",
-        (appeal_id, org_id),
-    ).fetchone()
-    if row is None:
-        # Same 404-vs-409 split as decide_request: a decided appeal must not be
-        # silently re-decided just because the console offered the buttons again.
-        exists = conn.execute(
-            "SELECT 1 FROM decision_appeals WHERE id = ? AND org_id = ?",
-            (appeal_id, org_id),
-        ).fetchone()
-        if exists is None:
-            raise HTTPException(status_code=404, detail="unknown appeal")
-        raise HTTPException(status_code=409, detail="appeal already decided")
-
-    conn.execute(
-        "UPDATE decision_appeals SET status = ?, admin_note = ?, decided_at = ?"
-        " WHERE id = ? AND org_id = ? AND status = 'pending'",
-        (body.decision, body.note, now_iso(), appeal_id, org_id),
-    )
-    conn.commit()
-    return {"status": body.decision}
-
-
 @router.get("/usage")
 async def usage(vg_admin: str | None = Cookie(default=None)) -> dict[str, list[dict]]:
-    org_id = _require_admin(vg_admin)
+    org_id = require_company(vg_admin)
     conn = get_conn()
     by_department = [dict(r) for r in conn.execute(
         "SELECT e.department, COUNT(*) AS events"
