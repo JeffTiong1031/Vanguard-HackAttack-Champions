@@ -1,5 +1,6 @@
 import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
+import { getMode, type Mode } from '../../src/mode/mode';
 import { toolForHost } from '../../src/policy/lookup';
 import type { PolicyRequest, PolicyResponse } from '../../src/policy/messages';
 import type { Enrolment, Policy, Tool } from '../../src/policy/types';
@@ -12,6 +13,7 @@ function Popup() {
   const [enrolment, setEnrolment] = useState<Enrolment | null>(null);
   const [policy, setPolicy] = useState<Policy | null>(null);
   const [host, setHost] = useState('');
+  const [mode, setMode] = useState<Mode | null>(null);
 
   useEffect(() => {
     void chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
@@ -27,10 +29,36 @@ function Popup() {
         setPolicy(r.policy);
       }
     });
+
+    void getMode().then(setMode);
   }, []);
 
   const openOptions = () => chrome.runtime.openOptionsPage();
 
+  if (mode === 'personal') {
+    return (
+      <div style="width:300px;padding:16px;font:14px/1.5 system-ui,sans-serif">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+          <img src="/icon/48.png" style="width:24px;height:24px" alt="" />
+          <h1 style="font-size:16px;margin:0">Vanguard</h1>
+        </div>
+        <p style="color:#0f172a;margin:0 0 6px 0"><strong>Personal mode</strong></p>
+        <p style="color:#475569;margin:0">
+          {host ? `Protecting sensitive data on ${host}.` : 'Protecting sensitive data on this device.'}
+          {' '}Nothing leaves your device.
+        </p>
+      </div>
+    );
+  }
+  if (mode === null) {
+    return (
+      <div style="width:300px;padding:16px;font:14px/1.5 system-ui,sans-serif">
+        <p style="color:#475569;margin:0 0 12px 0">Choose Personal or Enterprise to get started.</p>
+        <button onClick={openOptions} style="width:100%;padding:8px;border:none;
+                border-radius:6px;background:#e11d48;color:#fff;cursor:pointer">Open settings</button>
+      </div>
+    );
+  }
   if (!enrolment || !policy) {
     return (
       <div style="width:300px;padding:16px;font:14px/1.5 system-ui,sans-serif">
