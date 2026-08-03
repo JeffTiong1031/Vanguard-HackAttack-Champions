@@ -76,3 +76,28 @@ export type AppealRow = {
   disclosed_text: string | null; status: 'pending' | 'upheld' | 'overturned';
   admin_note: string | null; created_at: string; department: string;
 };
+
+export type Scope = 'company' | 'department';
+
+export type Session = {
+  role: Scope;
+  org_id: string;
+  org_name: string;
+  department_id?: string;
+  department?: string;
+};
+
+export type LoginResult = {
+  role: Scope;
+  org_id: string;
+  org_name: string;
+  department_id?: string;
+  department?: string;
+};
+
+export type Department = {
+  id: string;
+  name: string;
+  created_at: string;
+  active_tokens: number;
+};
