@@ -5,6 +5,7 @@ import { KeyIcon } from '../icons';
 export function Tokens() {
   const [rows, setRows] = useState<TokenRow[]>([]);
   const [minted, setMinted] = useState('');
+  const [name, setName] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
 
@@ -17,8 +18,9 @@ export function Tokens() {
   async function mint() {
     setBusy('mint'); setError('');
     try {
-      const r = await api.post<{ token: string }>('/v1/dept/tokens', {});
+      const r = await api.post<{ token: string }>('/v1/dept/tokens', { name: name.trim() });
       setMinted(r.token);
+      setName('');
       await load();
     } catch (err) {
       if (err instanceof UnauthorisedError) throw err;
@@ -45,6 +47,8 @@ export function Tokens() {
       </div>
 
       <div class="field">
+        <input value={name} placeholder="Employee name (optional)"
+               onInput={(e) => setName((e.target as HTMLInputElement).value)} />
         <button class="btn-primary" disabled={busy === 'mint'} onClick={mint}>Mint employee token</button>
       </div>
       {error && <p class="error">{error}</p>}
@@ -62,10 +66,11 @@ export function Tokens() {
       {rows.length === 0 && <p class="empty">No tokens minted yet.</p>}
       {rows.length > 0 && (
         <table>
-          <thead><tr><th>Department</th><th>Created</th><th>State</th><th></th></tr></thead>
+          <thead><tr><th>Name</th><th>Department</th><th>Created</th><th>State</th><th></th></tr></thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.id}>
+                <td>{row.name || <span style="color:#94a3b8">—</span>}</td>
                 <td><span class="name">{row.department}</span></td>
                 <td><code>{new Date(row.created_at).toLocaleString()}</code></td>
                 <td><span class={`pill ${row.revoked ? 'revoked' : 'active'}`}>{row.revoked ? 'revoked' : 'active'}</span></td>
