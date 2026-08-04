@@ -15,7 +15,7 @@ def _mint(department: str) -> str:
     plain, hashed = new_token(department[:3])
     get_conn().execute(
         "INSERT INTO enroll_tokens (id, org_id, department, token_hash, label, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?)",
+        " VALUES (%s, %s, %s, %s, %s, %s)",
         (uuid.uuid4().hex, org_id, department, hashed, department, now_iso()),
     )
     get_conn().commit()

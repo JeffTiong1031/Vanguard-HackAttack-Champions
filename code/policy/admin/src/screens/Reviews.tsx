@@ -29,10 +29,12 @@ export function Reviews({ scope }: { scope: Scope }) {
     return () => clearInterval(t);
   }, [base]);
 
-  async function decide(id: string, decision: 'upheld' | 'overturned') {
+  async function decide(id: string, decision: 'approved' | 'blocked') {
     setBusyId(id); setError('');
     try {
-      await api.post(`${base}/${id}`, { decision, note: notes[id]?.trim() || undefined });
+      await api.post(`${base}/${id}`, decision === 'blocked'
+        ? { decision, reason_code: 'policy_requirement_not_met', note: notes[id]?.trim() }
+        : { decision, note: notes[id]?.trim() || undefined });
       await load();
     } catch (err) {
       if (err instanceof UnauthorisedError) throw err;
@@ -48,7 +50,7 @@ export function Reviews({ scope }: { scope: Scope }) {
         <span class="ico"><GavelIcon /></span>
         <div>
           <h2>Reviews</h2>
-          <p class="sub">Employees contesting an automated block or redaction. Uphold the decision or overturn it.</p>
+          <p class="sub">Employees contesting an automated block. Commit one final access state: Approved or Blocked.</p>
         </div>
         <span class="tag count">{pending.length} pending</span>
       </div>
@@ -71,19 +73,20 @@ export function Reviews({ scope }: { scope: Scope }) {
                   {r.status === 'pending' && !readOnly ? (
                     <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
                       <input
-                        placeholder="Note to the employee (optional)"
+                        placeholder="Explanation required when blocked"
                         value={notes[r.id] ?? ''}
                         onInput={(e) => setNotes({ ...notes, [r.id]: (e.target as HTMLInputElement).value })}
                         style="width:200px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12.5px"
                       />
                       <div class="row-actions">
-                        <button class="btn-danger btn-sm" disabled={busyId === r.id} onClick={() => decide(r.id, 'upheld')}>Uphold</button>
-                        <button class="btn-primary btn-sm" disabled={busyId === r.id} onClick={() => decide(r.id, 'overturned')}>Overturn</button>
+                        <button class="btn-danger btn-sm" disabled={busyId === r.id || !notes[r.id]?.trim()} onClick={() => decide(r.id, 'blocked')}>Keep blocked</button>
+                        <button class="btn-primary btn-sm" disabled={busyId === r.id} onClick={() => decide(r.id, 'approved')}>Approve</button>
                       </div>
                     </div>
                   ) : (
                     <div>
-                      <span class={`pill ${r.status === 'overturned' ? 'approved' : 'blocked'}`}>{r.status}</span>
+                      <span class={`pill ${r.access_state}`}>{r.access_state}</span>
+                      {r.status === 'pending' && <div style="font-size:12px;color:#64748b;margin-top:4px">Review in progress</div>}
                       {r.admin_note && <div style="font-size:12px;color:#475569;margin-top:4px">“{r.admin_note}”</div>}
                     </div>
                   )}

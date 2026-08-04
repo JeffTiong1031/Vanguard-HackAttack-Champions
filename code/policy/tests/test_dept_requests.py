@@ -27,11 +27,11 @@ def test_dept_approval_writes_a_dept_override_not_company_policy():
 
     conn = get_conn()
     override = conn.execute(
-        "SELECT status FROM dept_llm_policy WHERE department_id = ? AND llm_id = 'google'",
+        "SELECT status FROM dept_llm_policy WHERE department_id = %s AND llm_id = 'google'",
         (dept_id,)).fetchone()
     assert override["status"] == "approved"
     company = conn.execute(
-        "SELECT status FROM org_llm_policy WHERE org_id = ? AND llm_id = 'google'",
+        "SELECT status FROM org_llm_policy WHERE org_id = %s AND llm_id = 'google'",
         (org_id,)).fetchone()
     assert company["status"] == "blocked"   # company default untouched
 

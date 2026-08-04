@@ -2,7 +2,13 @@
 
 Plain SQL, computed on demand -- the data is small and read far more than
 written, matching the rest of app/. I3: no prompt text is read or returned;
-only class, count, host, type, ts, and the admin-supplied name."""
+only class, count, host, type, ts, and the admin-supplied name.
+
+Postgres notes vs the former SQLite version:
+  * date('now', '-N days')  →  CURRENT_DATE - INTERVAL '...'
+  * substr(ts, 1, 10)       →  LEFT(ts, 10)  (ts is stored as ISO-8601 TEXT)
+  * Placeholders are %s, not ?
+"""
 
 WEIGHTS_SQL = (
     "CASE u.type WHEN 'ethics_block' THEN 5 WHEN 'pii_block' THEN 3"
@@ -21,34 +27,35 @@ _NAME = "COALESCE(NULLIF(e.name,''),'Unnamed')"
 
 
 def analytics_summary(conn, org_id: str, days: int, department_id: str | None) -> dict:
-    since = f"-{int(days) - 1} days"
-    scope = " AND e.department_id = ?" if department_id else ""
+    # Postgres interval: cast days to text inside the query
+    scope = " AND e.department_id = %s" if department_id else ""
     base = (
         "FROM usage_events u JOIN employees e ON e.id = u.employee_id"
-        " WHERE u.org_id = ? AND substr(u.ts,1,10) >= date('now', ?)" + scope
+        " WHERE u.org_id = %s AND LEFT(u.ts, 10) >= (CURRENT_DATE - (%s || ' days')::INTERVAL)::TEXT"
+        + scope
     )
-    p = (org_id, since) + ((department_id,) if department_id else ())
+    p = (org_id, str(days - 1)) + ((department_id,) if department_id else ())
 
     def q(sql):
-        return [dict(r) for r in conn.execute(sql, p)]
+        return [dict(r) for r in conn.execute(sql, p).fetchall()]
 
     usage_trend = q(
-        f"SELECT substr(u.ts,1,10) AS date, e.department AS department, COUNT(*) AS events "
+        f"SELECT LEFT(u.ts,10) AS date, e.department AS department, COUNT(*) AS events "
         f"{base} GROUP BY date, e.department ORDER BY date")
     alerts_timeline = q(
-        f"SELECT substr(u.ts,1,10) AS date,"
+        f"SELECT LEFT(u.ts,10) AS date,"
         f" SUM(CASE WHEN u.type IN ('ethics_block','pii_block') THEN 1 ELSE 0 END) AS high,"
         f" SUM(CASE WHEN u.type = 'warn_shown' THEN 1 ELSE 0 END) AS medium,"
         f" SUM(CASE WHEN u.type IN ('visit_unapproved','request_sent') THEN 1 ELSE 0 END) AS low "
         f"{base} GROUP BY date ORDER BY date")
     risk_timeline = q(
-        f"SELECT substr(u.ts,1,10) AS date, SUM({WEIGHTS_SQL}) AS risk "
+        f"SELECT LEFT(u.ts,10) AS date, SUM({WEIGHTS_SQL}) AS risk "
         f"{base} GROUP BY date ORDER BY date")
     top_apps = q(
         f"SELECT u.host AS host, COUNT(*) AS events {base} GROUP BY u.host ORDER BY events DESC LIMIT 10")
     top_employees = q(
         f"SELECT {_NAME} AS name, e.department AS department, COUNT(*) AS events,"
-        f" SUM({WEIGHTS_SQL}) AS risk {base} GROUP BY e.id ORDER BY risk DESC, events DESC LIMIT 10")
+        f" SUM({WEIGHTS_SQL}) AS risk {base} GROUP BY e.id, e.name, e.department ORDER BY risk DESC, events DESC LIMIT 10")
     top_departments = q(
         f"SELECT e.department AS department, COUNT(*) AS events, SUM({WEIGHTS_SQL}) AS risk "
         f"{base} GROUP BY e.department ORDER BY risk DESC LIMIT 10")
@@ -69,13 +76,13 @@ def analytics_summary(conn, org_id: str, days: int, department_id: str | None) -
 
 
 def analytics_alerts(conn, org_id: str, limit: int, department_id: str | None) -> list[dict]:
-    scope = " AND e.department_id = ?" if department_id else ""
+    scope = " AND e.department_id = %s" if department_id else ""
     params = (org_id,) + ((department_id,) if department_id else ()) + (int(limit),)
     rows = conn.execute(
         f"SELECT u.ts AS ts, e.department AS department, {_NAME} AS name, u.host AS host,"
         f" u.type AS type, u.category AS category, {ACTION_SQL} AS action, {SEVERITY_SQL} AS severity"
         f" FROM usage_events u JOIN employees e ON e.id = u.employee_id"
-        f" WHERE u.org_id = ?{scope} ORDER BY u.ts DESC LIMIT ?",
+        f" WHERE u.org_id = %s{scope} ORDER BY u.ts DESC LIMIT %s",
         params,
     ).fetchall()
     return [dict(r) for r in rows]

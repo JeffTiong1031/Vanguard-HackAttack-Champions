@@ -43,7 +43,7 @@ async def login(body: AdminLogin, response: Response) -> dict[str, str]:
     h = hash_token(body.secret)
     if body.role == "company":
         row = conn.execute(
-            "SELECT id, name FROM orgs WHERE admin_token_hash = ?", (h,)
+            "SELECT id, name FROM orgs WHERE admin_token_hash = %s", (h,)
         ).fetchone()
         if row is None:
             raise HTTPException(status_code=401, detail="invalid credentials")
@@ -54,7 +54,7 @@ async def login(body: AdminLogin, response: Response) -> dict[str, str]:
     row = conn.execute(
         "SELECT d.id AS dept_id, d.org_id, d.name AS dept_name, o.name AS org_name"
         " FROM departments d JOIN orgs o ON o.id = d.org_id"
-        " WHERE d.admin_token_hash = ?", (h,)
+        " WHERE d.admin_token_hash = %s", (h,)
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=401, detail="invalid credentials")
@@ -71,7 +71,7 @@ async def logout(response: Response, vg_admin: str | None = Cookie(default=None)
     from app.security import resolve_session
     if resolve_session(get_conn(), vg_admin) is None:
         raise HTTPException(status_code=401, detail="session required")
-    get_conn().execute("DELETE FROM admin_sessions WHERE token = ?", (vg_admin,))
+    get_conn().execute("DELETE FROM admin_sessions WHERE token = %s", (vg_admin,))
     get_conn().commit()
     response.delete_cookie(SESSION_COOKIE)
     return {"ok": True}
@@ -84,9 +84,9 @@ async def list_departments(vg_admin: str | None = Cookie(default=None)) -> list[
         "SELECT d.id, d.name, d.created_at,"
         " (SELECT COUNT(*) FROM enroll_tokens t"
         "    WHERE t.department_id = d.id AND t.revoked = 0) AS active_tokens"
-        " FROM departments d WHERE d.org_id = ? ORDER BY d.created_at DESC",
+        " FROM departments d WHERE d.org_id = %s ORDER BY d.created_at DESC",
         (org_id,),
-    )]
+    ).fetchall()]
 
 
 @router.post("/departments", status_code=201)
@@ -96,14 +96,14 @@ async def create_department_route(
     org_id = require_company(vg_admin)
     conn = get_conn()
     if conn.execute(
-        "SELECT 1 FROM departments WHERE org_id = ? AND name = ?", (org_id, name)
+        "SELECT 1 FROM departments WHERE org_id = %s AND name = %s", (org_id, name)
     ).fetchone():
         raise HTTPException(status_code=409, detail="department already exists")
     dept_id = uuid.uuid4().hex
     plain, hashed = new_token(name[:3])
     conn.execute(
         "INSERT INTO departments (id, org_id, name, admin_token_hash, created_at)"
-        " VALUES (?, ?, ?, ?, ?)",
+        " VALUES (%s, %s, %s, %s, %s)",
         (dept_id, org_id, name, hashed, now_iso()),
     )
     conn.commit()
@@ -119,13 +119,13 @@ async def regenerate_department(
     conn = get_conn()
     plain, hashed = new_token("DEP")
     cur = conn.execute(
-        "UPDATE departments SET admin_token_hash = ? WHERE id = ? AND org_id = ?",
+        "UPDATE departments SET admin_token_hash = %s WHERE id = %s AND org_id = %s",
         (hashed, dept_id, org_id),
     )
     if cur.rowcount == 0:
         raise HTTPException(status_code=404, detail="unknown department")
     # Old secret is now dead; also drop any live sessions opened with it.
-    conn.execute("DELETE FROM admin_sessions WHERE department_id = ?", (dept_id,))
+    conn.execute("DELETE FROM admin_sessions WHERE department_id = %s", (dept_id,))
     conn.commit()
     return {"id": dept_id, "secret": plain}
 
@@ -136,9 +136,9 @@ async def list_tools(vg_admin: str | None = Cookie(default=None)) -> list[dict]:
     return [dict(r) for r in get_conn().execute(
         "SELECT r.id AS llm_id, r.host, r.display_name, p.status"
         " FROM llm_registry r JOIN org_llm_policy p ON p.llm_id = r.id"
-        " WHERE p.org_id = ? ORDER BY r.display_name",
+        " WHERE p.org_id = %s ORDER BY r.display_name",
         (org_id,),
-    )]
+    ).fetchall()]
 
 
 @router.post("/tools/{llm_id}")
@@ -152,13 +152,10 @@ async def set_tool(
         raise HTTPException(status_code=422, detail="status must be approved or blocked")
     conn = get_conn()
     cur = conn.execute(
-        "UPDATE org_llm_policy SET status = ? WHERE org_id = ? AND llm_id = ?",
+        "UPDATE org_llm_policy SET status = %s WHERE org_id = %s AND llm_id = %s",
         (status, org_id, llm_id),
     )
     if cur.rowcount == 0:
-        # No row matched -- either llm_id doesn't exist or this org has no
-        # policy row for it. Either way nothing changed, so nothing to
-        # commit and nothing to bump: a no-op write must not look like one.
         raise HTTPException(status_code=404, detail="unknown tool")
     conn.commit()
     # Changes what GET /v1/policy serves for this org -- bump.
@@ -172,14 +169,15 @@ async def list_requests(vg_admin: str | None = Cookie(default=None)) -> list[dic
     the company dashboard can see every department's queue but cannot act on it."""
     org_id = require_company(vg_admin)
     return [dict(r) for r in get_conn().execute(
-        "SELECT a.id, a.reason, a.status, a.created_at, e.department,"
+        "SELECT a.id, a.reason, a.status, a.reason_code, a.admin_note, a.created_at, e.department,"
+        "       CASE WHEN a.status = 'approved' THEN 'approved' ELSE 'blocked' END AS access_state,"
         "       r.display_name, r.host, a.llm_id"
         " FROM access_requests a"
         " JOIN employees e ON e.id = a.employee_id"
         " JOIN llm_registry r ON r.id = a.llm_id"
-        " WHERE a.org_id = ? ORDER BY a.created_at DESC",
+        " WHERE a.org_id = %s ORDER BY a.created_at DESC",
         (org_id,),
-    )]
+    ).fetchall()]
 
 
 @router.get("/appeals")
@@ -189,12 +187,13 @@ async def list_appeals(vg_admin: str | None = Cookie(default=None)) -> list[dict
     org_id = require_company(vg_admin)
     return [dict(r) for r in get_conn().execute(
         "SELECT a.id, a.decision_type, a.category, a.employee_reason, a.disclosed_text,"
-        "       a.status, a.admin_note, a.created_at, e.department"
+        "       a.status, a.reason_code, a.admin_note, a.created_at, e.department,"
+        "       CASE WHEN a.status = 'approved' THEN 'approved' ELSE 'blocked' END AS access_state"
         " FROM decision_appeals a"
         " JOIN employees e ON e.id = a.employee_id"
-        " WHERE a.org_id = ? ORDER BY a.created_at DESC",
+        " WHERE a.org_id = %s ORDER BY a.created_at DESC",
         (org_id,),
-    )]
+    ).fetchall()]
 
 
 @router.get("/usage")
@@ -204,20 +203,20 @@ async def usage(vg_admin: str | None = Cookie(default=None)) -> dict[str, list[d
     by_department = [dict(r) for r in conn.execute(
         "SELECT e.department, COUNT(*) AS events"
         " FROM usage_events u JOIN employees e ON e.id = u.employee_id"
-        " WHERE u.org_id = ? GROUP BY e.department ORDER BY events DESC",
+        " WHERE u.org_id = %s GROUP BY e.department ORDER BY events DESC",
         (org_id,),
-    )]
+    ).fetchall()]
     by_tool = [dict(r) for r in conn.execute(
         "SELECT host, COUNT(*) AS events FROM usage_events"
-        " WHERE org_id = ? GROUP BY host ORDER BY events DESC",
+        " WHERE org_id = %s GROUP BY host ORDER BY events DESC",
         (org_id,),
-    )]
+    ).fetchall()]
     by_category = [dict(r) for r in conn.execute(
         "SELECT category, COUNT(*) AS events FROM usage_events"
-        " WHERE org_id = ? AND category IS NOT NULL"
+        " WHERE org_id = %s AND category IS NOT NULL"
         " GROUP BY category ORDER BY events DESC",
         (org_id,),
-    )]
+    ).fetchall()]
     return {"by_department": by_department, "by_tool": by_tool, "by_category": by_category}
 
 

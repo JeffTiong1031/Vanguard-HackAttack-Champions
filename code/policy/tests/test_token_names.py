@@ -1,4 +1,4 @@
-import uuid
+﻿import uuid
 from fastapi.testclient import TestClient
 from app.main import app
 from app.deps import get_conn
@@ -22,7 +22,7 @@ def test_minted_name_flows_to_the_enrolled_employee():
     assert any(r.get("name") == "Alice Tan" for r in rows)
     pid = emp.post("/v1/enroll", json={"token": token}).json()["pseudo_id"]
     name = get_conn().execute(
-        "SELECT name FROM employees WHERE pseudo_id = ?", (pid,)).fetchone()["name"]
+        "SELECT name FROM employees WHERE pseudo_id = %s", (pid,)).fetchone()["name"]
     assert name == "Alice Tan"
 
 
@@ -31,5 +31,5 @@ def test_name_is_optional():
     token = dc.post("/v1/dept/tokens", json={}).json()["token"]
     pid = emp.post("/v1/enroll", json={"token": token}).json()["pseudo_id"]
     name = get_conn().execute(
-        "SELECT name FROM employees WHERE pseudo_id = ?", (pid,)).fetchone()["name"]
+        "SELECT name FROM employees WHERE pseudo_id = %s", (pid,)).fetchone()["name"]
     assert name in (None, "")

@@ -15,7 +15,7 @@ def _enrolled_pseudo_id() -> str:
     plain, hashed = new_token("ENG")
     get_conn().execute(
         "INSERT INTO enroll_tokens (id, org_id, department, token_hash, label, created_at)"
-        " VALUES (?, ?, 'Engineering', ?, 'Engineering', ?)",
+        " VALUES (%s, %s, 'Engineering', %s, 'Engineering', %s)",
         (uuid.uuid4().hex, org_id, hashed, now_iso()),
     )
     get_conn().commit()

@@ -10,7 +10,8 @@ import uuid
 from fastapi import APIRouter, HTTPException
 
 from app.deps import get_conn
-from app.models import AllowanceConsume, AppealCreate
+from app.models import AppealCreate
+from app.remediation import get_remediation_guidance
 from app.security import now_iso
 
 router = APIRouter()
@@ -18,7 +19,7 @@ router = APIRouter()
 
 def _employee(conn, pseudo_id: str):
     emp = conn.execute(
-        "SELECT id, org_id FROM employees WHERE pseudo_id = ?", (pseudo_id,)
+        "SELECT id, org_id FROM employees WHERE pseudo_id = %s", (pseudo_id,)
     ).fetchone()
     if emp is None:
         raise HTTPException(status_code=401, detail="unknown enrolment")
@@ -30,60 +31,101 @@ async def create_appeal(body: AppealCreate) -> dict[str, str]:
     conn = get_conn()
     emp = _employee(conn, body.pseudo_id)
 
+    # Pre-Screen 1: An already approved scope fingerprint requires no manual review.
+    if body.scope_fingerprint:
+        approved_scope = conn.execute(
+            "SELECT id FROM decision_appeals"
+            " WHERE employee_id = %s AND scope_fingerprint = %s AND status = 'approved'",
+            (emp["id"], body.scope_fingerprint),
+        ).fetchone()
+        if approved_scope:
+            return {
+                "id": approved_scope["id"],
+                "status": "approved",
+                "access_state": "approved",
+                "pre_screen": "already_approved",
+            }
+
+    # Pre-Screen 2: Deduplicate pending appeals for identical scope/category.
+    if body.scope_fingerprint:
+        existing = conn.execute(
+            "SELECT id FROM decision_appeals"
+            " WHERE employee_id = %s AND scope_fingerprint = %s AND status = 'pending'",
+            (emp["id"], body.scope_fingerprint),
+        ).fetchone()
+    else:
+        existing = conn.execute(
+            "SELECT id FROM decision_appeals"
+            " WHERE employee_id = %s AND decision_type = %s AND category = %s AND status = 'pending'",
+            (emp["id"], body.decision_type, body.category),
+        ).fetchone()
+
+    if existing:
+        return {
+            "id": existing["id"],
+            "status": "pending",
+            "access_state": "blocked",
+            "pre_screen": "duplicate",
+        }
+
     appeal_id = uuid.uuid4().hex
     conn.execute(
         "INSERT INTO decision_appeals"
         " (id, org_id, employee_id, decision_type, category, employee_reason,"
-        "  disclosed_text, prompt_hash, status, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)",
+        "  disclosed_text, scope_fingerprint, status, created_at)"
+        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s)",
         (appeal_id, emp["org_id"], emp["id"], body.decision_type, body.category,
-         body.reason, body.disclosed_text, body.prompt_hash, now_iso()),
+         body.reason, body.disclosed_text, body.scope_fingerprint, now_iso()),
     )
     conn.commit()
-    return {"id": appeal_id, "status": "pending"}
+    return {
+        "id": appeal_id,
+        "status": "pending",
+        "access_state": "blocked",
+        "pre_screen": "ready_for_review",
+    }
 
 
-@router.get("/v1/appeals/allowances")
-async def list_allowances(pseudo_id: str) -> list[str]:
-    """The prompt hashes the caller has an ACTIVE one-time pass for -- an appeal
-    that was overturned, carries a prompt hash, and has not been used yet. The
-    extension checks a blocked prompt's hash against this list."""
+@router.get("/v1/appeals/approved-scopes")
+async def list_approved_scopes(pseudo_id: str) -> list[str]:
+    """Persistent scopes approved by a final binary decision.
+
+    These approvals are neither consumed nor expired. Changed content has a
+    different fingerprint and therefore starts blocked as a new scope.
+    """
     conn = get_conn()
     emp = _employee(conn, pseudo_id)
-    return [r["prompt_hash"] for r in conn.execute(
-        "SELECT prompt_hash FROM decision_appeals"
-        " WHERE employee_id = ? AND status = 'overturned'"
-        "   AND prompt_hash IS NOT NULL AND pass_used = 0",
+    return [r["scope_fingerprint"] for r in conn.execute(
+        "SELECT scope_fingerprint FROM decision_appeals"
+        " WHERE employee_id = %s AND status = 'approved'"
+        "   AND scope_fingerprint IS NOT NULL",
         (emp["id"],),
-    )]
-
-
-@router.post("/v1/appeals/allowances/consume")
-async def consume_allowance(body: AllowanceConsume) -> dict[str, int]:
-    """Burn the one-time pass for a prompt hash so it is never granted twice."""
-    conn = get_conn()
-    emp = _employee(conn, body.pseudo_id)
-    cur = conn.execute(
-        "UPDATE decision_appeals SET pass_used = 1"
-        " WHERE employee_id = ? AND prompt_hash = ? AND status = 'overturned' AND pass_used = 0",
-        (emp["id"], body.prompt_hash),
-    )
-    conn.commit()
-    return {"consumed": cur.rowcount}
+    ).fetchall()]
 
 
 @router.get("/v1/appeals")
 async def list_my_appeals(pseudo_id: str) -> list[dict]:
-    """The caller's OWN appeals only. disclosed_text is deliberately not returned
-    -- the employee wrote it; the list view is a status tracker, not a mirror."""
+    """The caller's OWN appeals only with remediation guidance for blocked states."""
     conn = get_conn()
     emp = conn.execute(
-        "SELECT id FROM employees WHERE pseudo_id = ?", (pseudo_id,)
+        "SELECT id FROM employees WHERE pseudo_id = %s", (pseudo_id,)
     ).fetchone()
     if emp is None:
         raise HTTPException(status_code=401, detail="unknown enrolment")
-    return [dict(r) for r in conn.execute(
-        "SELECT id, decision_type, category, status, admin_note, created_at, decided_at"
-        " FROM decision_appeals WHERE employee_id = ? ORDER BY created_at DESC",
+    
+    rows = conn.execute(
+        "SELECT id, decision_type, category, status, reason_code, admin_note, created_at, decided_at,"
+        " CASE WHEN status = 'approved' THEN 'approved' ELSE 'blocked' END AS access_state,"
+        " CASE WHEN status = 'pending' THEN 'in_review' ELSE 'decided' END AS request_state"
+        " FROM decision_appeals WHERE employee_id = %s ORDER BY created_at DESC",
         (emp["id"],),
-    )]
+    ).fetchall()
+
+    res = []
+    for r in rows:
+        item = dict(r)
+        if item["access_state"] == "blocked":
+            item["remediation_guidance"] = get_remediation_guidance(item["reason_code"], item["category"])
+        res.append(item)
+    return res
+

@@ -18,7 +18,7 @@ def _emp_id(org_id, dept_id, dept="Engineering"):
 def _event(org_id, emp_id, etype, ts):
     get_conn().execute(
         "INSERT INTO usage_events (id, org_id, employee_id, host, type, category, finding_hash, ts)"
-        " VALUES (?, ?, ?, 'chatgpt.com', ?, NULL, NULL, ?)",
+        " VALUES (%s, %s, %s, 'chatgpt.com', %s, NULL, NULL, %s)",
         (uuid.uuid4().hex, org_id, emp_id, etype, ts))
     get_conn().commit()
 

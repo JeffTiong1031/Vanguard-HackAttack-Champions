@@ -1,4 +1,4 @@
-import uuid
+﻿import uuid
 from fastapi.testclient import TestClient
 from app.main import app
 from app.deps import get_conn
@@ -32,4 +32,4 @@ def test_revoke_is_scoped_to_the_department():
     tok_id = dc.post("/v1/dept/tokens", json={}).json()["id"]
     assert dc.post(f"/v1/dept/tokens/{tok_id}/revoke").status_code == 200
     assert get_conn().execute(
-        "SELECT revoked FROM enroll_tokens WHERE id = ?", (tok_id,)).fetchone()["revoked"] == 1
+        "SELECT revoked FROM enroll_tokens WHERE id = %s", (tok_id,)).fetchone()["revoked"] == 1
