@@ -39,6 +39,11 @@ export default defineBackground(() => {
   console.info('[vanguard] background alive');
   setupKeepAliveServer();
 
+  // First run: land the user on the Personal/Enterprise chooser in Options.
+  chrome.runtime.onInstalled.addListener((details) => {
+    if (details.reason === 'install') void chrome.runtime.openOptionsPage();
+  });
+
   chrome.storage.onChanged.addListener(() => { cfgCache = null; });
 
   chrome.runtime.onMessage.addListener((msg: ScanRequest, _s, sendResponse) => {

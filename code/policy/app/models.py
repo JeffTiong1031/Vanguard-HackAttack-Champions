@@ -41,6 +41,7 @@ class EnrollResponse(BaseModel):
     org_name: str
     pseudo_id: str
     department: str
+    department_id: str | None = None
     policy: PolicyBody
 
 
@@ -83,8 +84,13 @@ class EventBatch(BaseModel):
 
 class AdminLogin(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    org_name: str
-    password: str
+    role: Literal["company", "department"]
+    secret: str = Field(max_length=200)
+
+
+class SignupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    company_name: str = Field(min_length=1, max_length=120)
 
 
 class AppealCreate(BaseModel):

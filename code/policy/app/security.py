@@ -52,11 +52,15 @@ def verify_password(pw: str, stored: str) -> bool:
         return False
 
 
-def issue_session(conn: sqlite3.Connection, org_id: str) -> str:
+def issue_session(
+    conn: sqlite3.Connection, org_id: str, role: str = "company",
+    department_id: str | None = None,
+) -> str:
     token = secrets.token_urlsafe(32)
     conn.execute(
-        "INSERT INTO admin_sessions (token, org_id, created_at) VALUES (?, ?, ?)",
-        (token, org_id, now_iso()),
+        "INSERT INTO admin_sessions (token, org_id, role, department_id, created_at)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (token, org_id, role, department_id, now_iso()),
     )
     conn.commit()
     return token
@@ -69,3 +73,19 @@ def session_org(conn: sqlite3.Connection, token: str | None) -> str | None:
         "SELECT org_id FROM admin_sessions WHERE token = ?", (token,)
     ).fetchone()
     return row["org_id"] if row else None
+
+
+def resolve_session(conn: sqlite3.Connection, token: str | None) -> sqlite3.Row | None:
+    """Full session row (org_id, role, department_id) for a role-scoped guard.
+
+    `session_org` above is kept, unchanged, for the pre-hierarchy call sites
+    that only ever need an org_id (app/routes/admin.py, until it is repointed
+    at this in a later task) -- it still works because `role` now defaults to
+    'company' and every legacy session row is a company session in spirit.
+    """
+    if not token:
+        return None
+    return conn.execute(
+        "SELECT org_id, role, department_id FROM admin_sessions WHERE token = ?",
+        (token,),
+    ).fetchone()

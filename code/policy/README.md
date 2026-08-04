@@ -31,7 +31,7 @@ a server that already imported. On stage that reads as a broken product.
 ```bash
 python -m venv .venv && .venv/Scripts/pip install -e ".[dev]"
 cd admin && npm install && npm run build && cd ..   # MUST run before uvicorn starts
-.venv/Scripts/python scripts/seed.py          # prints the department tokens
+.venv/Scripts/python scripts/seed.py          # builds the demo world, writes DEMO-TOKENS.md
 .venv/Scripts/python -m uvicorn app.main:app --host 0.0.0.0 --port 8001
 ```
 
@@ -42,6 +42,31 @@ launched with no build present, so a missing console is visible in the log,
 not just as a mysterious 404.
 
 `--host 0.0.0.0` is required for the two-laptop demo (spec §5.4).
+
+## Signup, login, and enrolment — three tiers
+
+The service has three tiers of identity, each with its own credential:
+
+1. **Company** — self-signup at `/` with just a company name. The response is
+   a **Company Admin secret, shown once** and never stored except as a
+   SHA-256 hash. There is no separate "create an account" password step.
+2. **Department** — the company dashboard creates departments; each one gets
+   its own **Department Admin secret** (also shown once). A department admin
+   sees and decides only its own department's requests, appeals, and tokens.
+3. **Employee** — a department dashboard mints employee enrolment tokens; the
+   employee pastes one into the extension, which exchanges it once for a
+   pseudonymous `pseudo_id`.
+
+Login is a single endpoint with a role picker: `POST /v1/admin/login
+{"role": "company"|"department", "secret": "..."}`. Both roles share the same
+`vg_admin` session cookie; server-side `role` (never the client) decides which
+routes -- `/v1/admin/*` (company) or `/v1/dept/*` (department) -- the session
+may reach.
+
+**Reseed the demo:** delete `policy.db`, then run `python scripts/seed.py` --
+it builds a fresh company/department/employee world and writes every secret
+and token to `DEMO-TOKENS.md` (git-ignored; regenerated per machine, never
+committed).
 
 ## Standing constraints
 

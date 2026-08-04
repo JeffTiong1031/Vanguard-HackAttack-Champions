@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS orgs (
     id                  TEXT PRIMARY KEY,
     name                TEXT NOT NULL,
     admin_password_hash TEXT NOT NULL,
+    admin_token_hash    TEXT,
     policy_version      INTEGER NOT NULL DEFAULT 1
 );
 
@@ -17,23 +18,25 @@ CREATE TABLE IF NOT EXISTS orgs (
 -- employee cannot self-declare it, and department is the axis the whole usage
 -- dashboard is organised on.
 CREATE TABLE IF NOT EXISTS enroll_tokens (
-    id         TEXT PRIMARY KEY,
-    org_id     TEXT NOT NULL REFERENCES orgs(id),
-    department TEXT NOT NULL,
-    token_hash TEXT NOT NULL UNIQUE,
-    label      TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    revoked    INTEGER NOT NULL DEFAULT 0
+    id            TEXT PRIMARY KEY,
+    org_id        TEXT NOT NULL REFERENCES orgs(id),
+    department    TEXT NOT NULL,
+    department_id TEXT REFERENCES departments(id),
+    token_hash    TEXT NOT NULL UNIQUE,
+    label         TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    revoked       INTEGER NOT NULL DEFAULT 0
 );
 
 -- I3 / spec section 8: pseudo_id and department only. There is deliberately no
 -- column here that could hold a name or an email address.
 CREATE TABLE IF NOT EXISTS employees (
-    id         TEXT PRIMARY KEY,
-    org_id     TEXT NOT NULL REFERENCES orgs(id),
-    pseudo_id  TEXT NOT NULL UNIQUE,
-    department TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    id            TEXT PRIMARY KEY,
+    org_id        TEXT NOT NULL REFERENCES orgs(id),
+    pseudo_id     TEXT NOT NULL UNIQUE,
+    department    TEXT NOT NULL,
+    department_id TEXT REFERENCES departments(id),
+    created_at    TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS llm_registry (
@@ -100,10 +103,41 @@ CREATE TABLE IF NOT EXISTS usage_events (
     ts           TEXT NOT NULL
 );
 
+-- department_id is deliberately NOT a `REFERENCES departments(id)` FK, unlike
+-- the other department_id columns in this file: a session is an ephemeral
+-- credential, not a record of the department's existence, and PRAGMA
+-- foreign_keys=ON would otherwise reject a session row the instant a
+-- department is ever removed. (Also required so unit tests can exercise
+-- issue_session()/resolve_session() with a bare placeholder id, decoupled
+-- from a real departments row.)
 CREATE TABLE IF NOT EXISTS admin_sessions (
-    token      TEXT PRIMARY KEY,
-    org_id     TEXT NOT NULL REFERENCES orgs(id),
-    created_at TEXT NOT NULL
+    token         TEXT PRIMARY KEY,
+    org_id        TEXT NOT NULL REFERENCES orgs(id),
+    role          TEXT NOT NULL DEFAULT 'company' CHECK (role IN ('company','department')),
+    department_id TEXT,
+    created_at    TEXT NOT NULL
+);
+
+-- Each row is a department AND its login secret (admin_token_hash). A
+-- department has no independent identity outside an org: (org_id, name) is
+-- unique, so two orgs may each have an "Engineering" department.
+CREATE TABLE IF NOT EXISTS departments (
+    id               TEXT PRIMARY KEY,
+    org_id           TEXT NOT NULL REFERENCES orgs(id),
+    name             TEXT NOT NULL,
+    admin_token_hash TEXT NOT NULL UNIQUE,
+    created_at       TEXT NOT NULL,
+    UNIQUE (org_id, name)
+);
+
+-- A department-level override of the company's org_llm_policy default.
+-- Effective policy for an employee = coalesce(dept override, company default).
+CREATE TABLE IF NOT EXISTS dept_llm_policy (
+    org_id        TEXT NOT NULL REFERENCES orgs(id),
+    department_id TEXT NOT NULL REFERENCES departments(id),
+    llm_id        TEXT NOT NULL REFERENCES llm_registry(id),
+    status        TEXT NOT NULL CHECK (status IN ('approved','blocked')),
+    PRIMARY KEY (department_id, llm_id)
 );
 
 CREATE INDEX IF NOT EXISTS ix_events_org_ts ON usage_events (org_id, ts);
@@ -122,6 +156,8 @@ def connect(path: str) -> sqlite3.Connection:
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     _migrate_appeals(conn)
+    _migrate_hierarchy(conn)
+    _migrate_analytics(conn)
     conn.commit()
 
 
@@ -134,6 +170,40 @@ def _migrate_appeals(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE decision_appeals ADD COLUMN prompt_hash TEXT")
     if "pass_used" not in cols:
         conn.execute("ALTER TABLE decision_appeals ADD COLUMN pass_used INTEGER NOT NULL DEFAULT 0")
+
+
+def _migrate_hierarchy(conn: sqlite3.Connection) -> None:
+    """Add hierarchy columns to a DB that predates them. CREATE TABLE IF NOT
+    EXISTS never alters an existing table, so older DBs need columns by hand.
+    The two new TABLES are handled by SCHEMA's IF NOT EXISTS already."""
+    def cols(table: str) -> set[str]:
+        return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+    adds = [
+        ("orgs", "admin_token_hash", "ALTER TABLE orgs ADD COLUMN admin_token_hash TEXT"),
+        ("admin_sessions", "role",
+         "ALTER TABLE admin_sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'company'"),
+        ("admin_sessions", "department_id",
+         "ALTER TABLE admin_sessions ADD COLUMN department_id TEXT"),
+        ("employees", "department_id",
+         "ALTER TABLE employees ADD COLUMN department_id TEXT"),
+        ("enroll_tokens", "department_id",
+         "ALTER TABLE enroll_tokens ADD COLUMN department_id TEXT"),
+    ]
+    for table, column, ddl in adds:
+        if column not in cols(table):
+            conn.execute(ddl)
+
+
+def _migrate_analytics(conn: sqlite3.Connection) -> None:
+    """Add the admin-supplied employee-name label to tokens and employees.
+    Migration-only: init_schema runs this after executescript(SCHEMA), so a
+    fresh DB (whose SCHEMA has no `name`) gets the column here too."""
+    def cols(table: str) -> set[str]:
+        return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+    if "name" not in cols("enroll_tokens"):
+        conn.execute("ALTER TABLE enroll_tokens ADD COLUMN name TEXT")
+    if "name" not in cols("employees"):
+        conn.execute("ALTER TABLE employees ADD COLUMN name TEXT")
 
 
 def bump_policy_version(conn: sqlite3.Connection, org_id: str) -> int:

@@ -1,5 +1,6 @@
 import { pickAdapter } from '../src/adapters/registry';
 import { recordFindings, recordIgnore } from '../src/audit/audit';
+import { capabilitiesFor, getMode, type ModeCapabilities } from '../src/mode/mode';
 import type { GovernanceEvent } from '../src/policy/types';
 import type { PolicyRequest, AllowanceResponse } from '../src/policy/messages';
 
@@ -36,6 +37,7 @@ import {
   showProtectionDegraded,
 } from '../src/ui/mount';
 import { debounce } from '../src/util/debounce';
+import { setupKeepAliveClient } from '../src/util/keepalive';
 
 const COLD_HASH = '\0cold';
 // First-run weight download (quantized mBERT NER) routinely exceeds a few seconds on a
@@ -44,17 +46,24 @@ const COLD_HASH = '\0cold';
 // (estimate) team-test value; U6-b still measures the real curve later.
 const L2_TIMEOUT_MS = 120_000;
 
-import { setupKeepAliveClient } from '../src/util/keepalive';
-
 export default defineContentScript({
   matches: ['https://chatgpt.com/*', 'https://claude.ai/*'],
   runAt: 'document_start',
   world: 'ISOLATED',
-  main() {
+  async main() {
+    // Synchronous (chrome.runtime.connect, no await), so it cannot delay the
+    // gate registration below that U12 requires at document_start. Runs in both
+    // modes: Personal still scans locally through the offscreen document.
     setupKeepAliveClient();
 
     const adapter = pickAdapter(location.hostname);
     if (!adapter) return;
+
+    // Resolved AFTER installGate (below) so gate registration stays synchronous
+    // at document_start (U12). Until resolved, default to Personal — the private,
+    // fail-safe direction. onBlocked/emit read this `let` at event time, long
+    // after load, so they see the resolved value.
+    let caps: ModeCapabilities = capabilitiesFor('personal');
 
     const cache = new VerdictCache();
     const approvals = new ApprovalStore();
@@ -71,46 +80,6 @@ export default defineContentScript({
 
     const scanText = (text: string) =>
       scanInto(new VerdictCache(), text, { l2TimeoutMs: CLIENT_LIMITS.fileScanTimeoutMs, purpose: 'file' });
-
-    installFileCapture({
-      onFiles: (picked) => {
-        for (const file of picked) {
-          // Oversize: never enter the FileStore / "Not checked" chip path.
-          // Ask immediately; Proceed re-attaches unchecked, Decline drops it.
-          // Either way Send later only reviews the prompt (and any other held files).
-          if (file.size > CLIENT_LIMITS.maxUploadBytes) {
-            showOversizedDialog({
-              fileName: file.name,
-              sizeBytes: file.size,
-              onProceed: () => {
-                hideOversizedDialog();
-                const input = adapter.fileInputs()[0];
-                if (input) attachFiles(input, [file]);
-                else {
-                  showRedactionFailure(
-                    "Vanguard couldn't attach this file to the page. Please reload the tab and try again.",
-                  );
-                }
-                void recordIgnore(
-                  [{ cls: 'PERSON', start: 0, end: 0, text: '' }],
-                  'file_unchecked:too_large: user trusted and attached without scan',
-                );
-              },
-              onDecline: () => {
-                hideOversizedDialog();
-              },
-            });
-            continue;
-          }
-
-          const id = files.add(file);
-          // Scan starts at ATTACH, not at Send. By the time the user finishes
-          // typing, the File pane is usually already populated -- the
-          // progressive UI is a consequence of the interception, not extra work.
-          void processFile(files, id, defaultDeps(scanText));
-        }
-      },
-    });
 
     const hints = createComposerHints({
       numbering,
@@ -157,7 +126,7 @@ export default defineContentScript({
         // Ethics is checked FIRST and blocks outright. A prompt asking for a
         // covert-surveillance script is not made acceptable by masking a name,
         // so the PII path below must not be able to wave it through.
-        const ethics = checkEthics(text);
+        const ethics = caps.ethics ? checkEthics(text) : null;
         if (ethics) {
           const promptHash = hashes.get(text) ?? await sha256Hex(text);
           // One-time pass: an overturned appeal for THIS exact prompt lets it
@@ -207,13 +176,15 @@ export default defineContentScript({
         if (!promptDirty && !files.hasHeld()) return;
 
         // I3: the CLASS of each finding and a count. Never the matched text.
-        for (const finding of promptDirty ? verdict!.findings : []) {
-          emitGovernance({
-            host: location.hostname,
-            type: 'pii_block',
-            category: finding.cls,
-            ts: new Date().toISOString(),
-          });
+        if (caps.reporting) {
+          for (const finding of promptDirty ? verdict!.findings : []) {
+            emitGovernance({
+              host: location.hostname,
+              type: 'pii_block',
+              category: finding.cls,
+              ts: new Date().toISOString(),
+            });
+          }
         }
 
         showModal({
@@ -328,5 +299,42 @@ export default defineContentScript({
       hints.update(text);
       void scan(text);
     });
+
+    // Mode is resolved here, AFTER installGate/hints/scan are wired synchronously.
+    caps = capabilitiesFor((await getMode()) ?? 'personal');
+
+    // File capture is a cloud round-trip (extract/redact) -> Enterprise only.
+    if (caps.files) {
+      installFileCapture({
+        onFiles: (picked) => {
+          for (const file of picked) {
+            if (file.size > CLIENT_LIMITS.maxUploadBytes) {
+              showOversizedDialog({
+                fileName: file.name,
+                sizeBytes: file.size,
+                onProceed: () => {
+                  hideOversizedDialog();
+                  const input = adapter.fileInputs()[0];
+                  if (input) attachFiles(input, [file]);
+                  else {
+                    showRedactionFailure(
+                      "Vanguard couldn't attach this file to the page. Please reload the tab and try again.",
+                    );
+                  }
+                  void recordIgnore(
+                    [{ cls: 'PERSON', start: 0, end: 0, text: '' }],
+                    'file_unchecked:too_large: user trusted and attached without scan',
+                  );
+                },
+                onDecline: () => { hideOversizedDialog(); },
+              });
+              continue;
+            }
+            const id = files.add(file);
+            void processFile(files, id, defaultDeps(scanText));
+          }
+        },
+      });
+    }
   },
 });

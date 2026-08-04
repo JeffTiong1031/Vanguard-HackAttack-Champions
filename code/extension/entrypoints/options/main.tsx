@@ -6,6 +6,7 @@ import {
   setApiBase,
   setDemoToken,
 } from '../../src/files/config';
+import { getMode, setMode, optionsView, type Mode } from '../../src/mode/mode';
 import { getPolicyBase, setPolicyBase } from '../../src/policy/config';
 import type { PolicyRequest, PolicyResponse, AppealsResponse } from '../../src/policy/messages';
 import { clearEnrolment } from '../../src/policy/store';
@@ -66,8 +67,9 @@ function Organisation() {
     <section>
       <h2 style="font-size:16px">Organisation</h2>
       <p style="color:#475569">
-        Paste the enrolment token your admin gave you. It identifies your department,
-        not you — Vanguard never stores your name or email address.
+        Paste the enrolment token your admin gave you. Vanguard never collects your name,
+        email, or prompt text. Your organisation may label your enrolment with your name
+        for its own records.
       </p>
       <input
         value={base}
@@ -160,13 +162,78 @@ function MyReviews() {
   );
 }
 
+function ModePicker({ onChoose }: { onChoose: (m: Mode) => void }) {
+  const card = 'flex:1;border:1px solid #e2e8f0;border-radius:10px;padding:20px;cursor:pointer;text-align:left;background:#fff';
+  return (
+    <section>
+      <h2 style="font-size:16px">Choose how Vanguard runs</h2>
+      <div style="display:flex;gap:16px;margin-top:12px">
+        <button style={card} onClick={() => onChoose('personal')}>
+          <strong style="display:block;font-size:15px;margin-bottom:6px">Personal</strong>
+          <span style="color:#475569;font-size:13px">
+            Protect your own sensitive data on this device. Nothing is sent anywhere.
+          </span>
+        </button>
+        <button style={card} onClick={() => onChoose('enterprise')}>
+          <strong style="display:block;font-size:15px;margin-bottom:6px">Enterprise</strong>
+          <span style="color:#475569;font-size:13px">
+            Connect to your organisation's policy, approvals, and file checking.
+          </span>
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function PersonalPanel({ onSwitch }: { onSwitch: () => void }) {
+  return (
+    <section>
+      <h2 style="font-size:16px">Personal mode</h2>
+      <p style="color:#475569">
+        Vanguard protects sensitive data locally on ChatGPT and Claude. Nothing leaves this device —
+        no organisation, no reporting, no file uploads.
+      </p>
+      <button onClick={onSwitch} style="padding:6px 12px;border:1px solid #cbd5e1;
+              border-radius:6px;background:#fff;cursor:pointer">Switch to Enterprise</button>
+    </section>
+  );
+}
+
 function Options() {
+  const [mode, setModeState] = useState<Mode | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => { void getMode().then((m) => { setModeState(m); setLoaded(true); }); }, []);
+
+  async function choose(m: Mode) { await setMode(m); setModeState(m); }
+  async function toPersonal() {
+    await clearEnrolment();            // disconnect + stop reporting
+    await setMode('personal');
+    setModeState('personal');
+  }
+
+  const view = loaded ? optionsView(mode) : null;
+
   return (
     <div style="font:14px/1.5 system-ui, sans-serif; max-width:560px">
       <h1 style="font-size:18px">Vanguard</h1>
-      <Organisation />
-      <FileService />
-      <MyReviews />
+      {view === null && <p style="color:#64748b">Loading…</p>}
+      {view === 'picker' && <ModePicker onChoose={choose} />}
+      {view === 'personal' && <PersonalPanel onSwitch={() => void choose('enterprise')} />}
+      {view === 'enterprise' && (
+        <>
+          <Organisation />
+          <FileService />
+          <MyReviews />
+          <section style="margin-top:32px;border-top:1px solid #e2e8f0;padding-top:16px">
+            <button onClick={() => void toPersonal()} style="padding:6px 12px;border:1px solid #cbd5e1;
+                    border-radius:6px;background:#fff;cursor:pointer">Switch to Personal</button>
+            <p style="color:#94a3b8;font-size:12px;margin-top:6px">
+              Switching disconnects from your organisation and stops all reporting.
+            </p>
+          </section>
+        </>
+      )}
     </div>
   );
 }
