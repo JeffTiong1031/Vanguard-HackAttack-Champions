@@ -39,17 +39,19 @@ def analytics_summary(conn, org_id: str, days: int, department_id: str | None) -
     def q(sql):
         return [dict(r) for r in conn.execute(sql, p).fetchall()]
 
+    tf = "LEFT(u.ts,13)" if days <= 7 else "LEFT(u.ts,10)"
+
     usage_trend = q(
-        f"SELECT LEFT(u.ts,10) AS date, e.department AS department, COUNT(*) AS events "
+        f"SELECT {tf} AS date, e.department AS department, COUNT(*) AS events "
         f"{base} GROUP BY date, e.department ORDER BY date")
     alerts_timeline = q(
-        f"SELECT LEFT(u.ts,10) AS date,"
+        f"SELECT {tf} AS date,"
         f" SUM(CASE WHEN u.type IN ('ethics_block','pii_block') THEN 1 ELSE 0 END) AS high,"
         f" SUM(CASE WHEN u.type = 'warn_shown' THEN 1 ELSE 0 END) AS medium,"
         f" SUM(CASE WHEN u.type IN ('visit_unapproved','request_sent') THEN 1 ELSE 0 END) AS low "
         f"{base} GROUP BY date ORDER BY date")
     risk_timeline = q(
-        f"SELECT LEFT(u.ts,10) AS date, SUM({WEIGHTS_SQL}) AS risk "
+        f"SELECT {tf} AS date, SUM({WEIGHTS_SQL}) AS risk "
         f"{base} GROUP BY date ORDER BY date")
     top_apps = q(
         f"SELECT u.host AS host, COUNT(*) AS events {base} GROUP BY u.host ORDER BY events DESC LIMIT 10")

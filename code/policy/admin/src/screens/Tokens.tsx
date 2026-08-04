@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, UnauthorisedError, type TokenRow } from '../api';
-import { KeyIcon } from '../icons';
+import { KeyIcon, UsersIcon, CheckCircleIcon, XCircleIcon } from '../icons';
+import { StatCard } from './charts';
 
 export function Tokens() {
   const [rows, setRows] = useState<TokenRow[]>([]);
@@ -35,55 +36,109 @@ export function Tokens() {
     finally { setBusy(''); }
   }
 
+  const activeTokens = rows.filter((r) => !r.revoked);
+  const revokedTokens = rows.filter((r) => r.revoked);
+
   return (
-    <section class="panel">
-      <div class="panel-head">
-        <span class="ico"><KeyIcon /></span>
-        <div>
-          <h2>Employee Tokens</h2>
-          <p class="sub">Each token enrols one employee into this department. Give one token per person; they paste it into the extension.</p>
-        </div>
-        <span class="tag count">{rows.filter((r) => !r.revoked).length} active</span>
+    <div>
+      {/* Top Stat Cards Grid */}
+      <div class="kpi-grid">
+        <StatCard
+          label="Active Tokens"
+          value={activeTokens.length.toLocaleString()}
+          sub="Valid for employee enrolment"
+          icon={CheckCircleIcon}
+          color="emerald"
+        />
+        <StatCard
+          label="Revoked Tokens"
+          value={revokedTokens.length.toLocaleString()}
+          sub="Disabled for new enrolments"
+          icon={XCircleIcon}
+          color="rose"
+        />
+        <StatCard
+          label="Total Minted"
+          value={rows.length.toLocaleString()}
+          sub="Issued department tokens"
+          icon={KeyIcon}
+          color="indigo"
+        />
       </div>
 
-      <div class="field">
-        <input value={name} placeholder="Employee name (optional)"
-               onInput={(e) => setName((e.target as HTMLInputElement).value)} />
-        <button class="btn-primary" disabled={busy === 'mint'} onClick={mint}>Mint employee token</button>
-      </div>
-      {error && <p class="error">{error}</p>}
-      {minted && (
-        <div class="mint-result">
-          <strong>Copy this token now — it will not be shown again.</strong>
-          <code>{minted}</code>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="ico"><KeyIcon /></span>
+          <div>
+            <h2>Employee Enrolment Tokens</h2>
+            <p class="sub">Mint individual tokens for employees to connect their Vanguard extension to this department.</p>
+          </div>
+          <span class="tag count">{activeTokens.length} Active</span>
         </div>
-      )}
-      <p class="hint">
-        <strong>Revoke</strong> stops a token being used for <em>new</em> enrolments. It does not cut
-        off anyone already enrolled with it.
-      </p>
 
-      {rows.length === 0 && <p class="empty">No tokens minted yet.</p>}
-      {rows.length > 0 && (
-        <table>
-          <thead><tr><th>Name</th><th>Department</th><th>Created</th><th>State</th><th></th></tr></thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.id}>
-                <td>{row.name || <span style="color:#94a3b8">—</span>}</td>
-                <td><span class="name">{row.department}</span></td>
-                <td><code>{new Date(row.created_at).toLocaleString()}</code></td>
-                <td><span class={`pill ${row.revoked ? 'revoked' : 'active'}`}>{row.revoked ? 'revoked' : 'active'}</span></td>
-                <td>
-                  {!row.revoked && (
-                    <button class="btn-danger btn-sm" disabled={busy === row.id} onClick={() => revoke(row.id)}>Revoke</button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </section>
+        <div class="field" style="margin-bottom:16px">
+          <input
+            value={name}
+            placeholder="Employee name or ID (e.g. Alice Chen / ENG-402)…"
+            onInput={(e) => setName((e.target as HTMLInputElement).value)}
+          />
+          <button class="btn-primary" disabled={busy === 'mint'} onClick={mint}>
+            + Mint Employee Token
+          </button>
+        </div>
+
+        {error && <p class="error">{error}</p>}
+
+        {minted && (
+          <div class="mint-result">
+            <strong>Token Minted — Copy immediately (it will not be shown again):</strong>
+            <code>{minted}</code>
+          </div>
+        )}
+
+        <p class="hint">
+          <strong>Note on Revocation:</strong> Revoking a token prevents it from being used for <em>new</em> extension enrolments. Existing enrolled extensions remain active.
+        </p>
+
+        {rows.length === 0 && <p class="empty">No employee tokens minted yet.</p>}
+
+        {rows.length > 0 && (
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Employee Name</th>
+                  <th>Department</th>
+                  <th>Minted Date</th>
+                  <th>Token Status</th>
+                  <th style="text-align:right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.name ? <span class="name">{row.name}</span> : <span style="color:var(--ink-4)">—</span>}</td>
+                    <td>{row.department}</td>
+                    <td><code>{new Date(row.created_at).toLocaleString()}</code></td>
+                    <td>
+                      <span class={`pill ${row.revoked ? 'revoked' : 'active'}`}>
+                        {row.revoked ? 'Revoked' : 'Active'}
+                      </span>
+                    </td>
+                    <td style="text-align:right">
+                      {!row.revoked && (
+                        <button class="btn-danger btn-sm" disabled={busy === row.id} onClick={() => revoke(row.id)}>
+                          Revoke Token
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

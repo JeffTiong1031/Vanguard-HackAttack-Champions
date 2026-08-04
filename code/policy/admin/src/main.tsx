@@ -1,6 +1,6 @@
 import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
-import { api, UnauthorisedError, type Session, type Scope } from './api';
+import { api, UnauthorisedError, type Session } from './api';
 import { Login } from './screens/Login';
 import { Signup } from './screens/Signup';
 import { Tools } from './screens/Tools';
@@ -11,15 +11,94 @@ import { AiUsage } from './screens/AiUsage';
 import { InsiderRisk } from './screens/InsiderRisk';
 import { Tokens } from './screens/Tokens';
 import { DeptTools } from './screens/DeptTools';
-import { LayersIcon, ShieldIcon, InboxIcon, BarIcon, KeyIcon, GavelIcon } from './icons';
+import {
+  LayersIcon, ShieldIcon, InboxIcon, BarIcon, KeyIcon, GavelIcon,
+  PanelLeftIcon, ChevronRightIcon, ChevronLeftIcon
+} from './icons';
 import './style.css';
 
 const SESSION_KEY = 'vg_admin_session';
 
-type TabDef = [string, string, typeof ShieldIcon, preact.ComponentChildren];
+interface NavItem {
+  id: string;
+  label: string;
+  category: string;
+  icon: typeof ShieldIcon;
+  component: preact.ComponentChildren;
+}
 
 function loadSession(): Session | null {
   try { return JSON.parse(localStorage.getItem(SESSION_KEY) ?? 'null'); } catch { return null; }
+}
+
+function useScrollReveal(activeId: string) {
+  useEffect(() => {
+    let lastScrollY = window.scrollY;
+    let isScrollingUp = false;
+
+    const updateDirectionClasses = () => {
+      const currentScrollY = window.scrollY;
+      if (Math.abs(currentScrollY - lastScrollY) < 2) return;
+      isScrollingUp = currentScrollY < lastScrollY;
+      lastScrollY = currentScrollY;
+
+      const hiddenTargets = document.querySelectorAll('.reveal-target:not(.reveal-in)');
+      hiddenTargets.forEach((el) => {
+        if (isScrollingUp) {
+          el.classList.add('from-top');
+          el.classList.remove('from-bottom');
+        } else {
+          el.classList.add('from-bottom');
+          el.classList.remove('from-top');
+        }
+      });
+    };
+
+    window.addEventListener('scroll', updateDirectionClasses, { passive: true });
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const el = entry.target as HTMLElement;
+          if (entry.isIntersecting) {
+            if (isScrollingUp) {
+              el.classList.add('from-top');
+              el.classList.remove('from-bottom');
+            } else {
+              el.classList.add('from-bottom');
+              el.classList.remove('from-top');
+            }
+            requestAnimationFrame(() => {
+              el.classList.add('reveal-in');
+            });
+          }
+        });
+      },
+      { threshold: 0.05, rootMargin: '0px 0px -20px 0px' }
+    );
+
+    // Instant scroll to top on page navigation
+    window.scrollTo({ top: 0 });
+
+    // Mark elements in initial viewport as visible immediately to avoid flash
+    const targets = document.querySelectorAll(
+      '.panel, .stat-card, .table-wrap, .bars-group'
+    );
+    targets.forEach((el) => {
+      const rect = el.getBoundingClientRect();
+      if (rect.top < window.innerHeight) {
+        el.classList.add('reveal-in');
+      } else {
+        el.classList.add('reveal-target', 'from-bottom');
+        observer.observe(el);
+      }
+    });
+
+    return () => {
+      window.removeEventListener('scroll', updateDirectionClasses);
+      observer.disconnect();
+    };
+  }, [activeId]);
 }
 
 function App() {
@@ -27,10 +106,6 @@ function App() {
   const [view, setView] = useState<'login' | 'signup'>('login');
   const [checking, setChecking] = useState(() => !!loadSession());
 
-  // Verify a cached session with a role-appropriate authenticated call. A 401
-  // means it expired -> drop it. Any other failure leaves it alone (the backend
-  // may simply be down); the user retries with a reload. Timeout so a hung
-  // request degrades the same way a rejection does.
   useEffect(() => {
     const cached = loadSession();
     if (!cached) return;
@@ -45,7 +120,6 @@ function App() {
       });
   }, []);
 
-  // A 401 anywhere bounces to login (screens don't catch UnauthorisedError).
   useEffect(() => {
     function onRejection(event: PromiseRejectionEvent) {
       if (event.reason instanceof UnauthorisedError) {
@@ -65,12 +139,12 @@ function App() {
   }
 
   async function logout() {
-    try { await api.post('/v1/admin/logout'); } catch { /* clear locally regardless */ }
+    try { await api.post('/v1/admin/logout'); } catch { /* clear locally */ }
     localStorage.removeItem(SESSION_KEY);
     setSession(null);
   }
 
-  if (checking) return <div class="login-wrap"><p class="empty">Checking session…</p></div>;
+  if (checking) return <div class="login-wrap"><p class="empty">Authenticating security session…</p></div>;
   if (!session) {
     return view === 'signup'
       ? <Signup onBack={() => setView('login')} />
@@ -81,51 +155,117 @@ function App() {
 
 function Dashboard({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const isCompany = session.role === 'company';
-  const tabs: TabDef[] = isCompany
+  const [collapsed, setCollapsed] = useState(false);
+
+  const navItems: NavItem[] = isCompany
     ? [
-        ['departments', 'Departments', KeyIcon, <Departments />],
-        ['tools', 'Tools', ShieldIcon, <Tools />],
-        ['requests', 'Requests', InboxIcon, <Requests scope="company" />],
-        ['reviews', 'Reviews', GavelIcon, <Reviews scope="company" />],
-        ['usage', 'AI Usage', BarIcon, <AiUsage scope="company" />],
-        ['risk', 'Insider Risk', ShieldIcon, <InsiderRisk scope="company" />],
+        { id: 'risk', label: 'Insider Risk', category: 'Dashboards', icon: ShieldIcon, component: <InsiderRisk scope="company" /> },
+        { id: 'usage', label: 'AI Usage & Telemetry', category: 'Dashboards', icon: BarIcon, component: <AiUsage scope="company" /> },
+        { id: 'requests', label: 'Access Requests', category: 'Security & Access', icon: InboxIcon, component: <Requests scope="company" /> },
+        { id: 'reviews', label: 'Prompt Audits & Appeals', category: 'Security & Access', icon: GavelIcon, component: <Reviews scope="company" /> },
+        { id: 'tools', label: 'Tools Policy Matrix', category: 'Security & Access', icon: ShieldIcon, component: <Tools /> },
+        { id: 'departments', label: 'Departments & Secrets', category: 'Management', icon: KeyIcon, component: <Departments /> },
       ]
     : [
-        ['requests', 'Requests', InboxIcon, <Requests scope="department" />],
-        ['reviews', 'Reviews', GavelIcon, <Reviews scope="department" />],
-        ['tokens', 'Employee Tokens', KeyIcon, <Tokens />],
-        ['tools', 'Tools', ShieldIcon, <DeptTools />],
-        ['usage', 'AI Usage', BarIcon, <AiUsage scope="department" />],
-        ['risk', 'Insider Risk', ShieldIcon, <InsiderRisk scope="department" />],
+        { id: 'risk', label: 'Insider Risk', category: 'Dashboards', icon: ShieldIcon, component: <InsiderRisk scope="department" /> },
+        { id: 'usage', label: 'AI Usage & Telemetry', category: 'Dashboards', icon: BarIcon, component: <AiUsage scope="department" /> },
+        { id: 'requests', label: 'Access Requests', category: 'Security & Access', icon: InboxIcon, component: <Requests scope="department" /> },
+        { id: 'reviews', label: 'Prompt Audits & Appeals', category: 'Security & Access', icon: GavelIcon, component: <Reviews scope="department" /> },
+        { id: 'tools', label: 'Department Tools', category: 'Security & Access', icon: ShieldIcon, component: <DeptTools /> },
+        { id: 'tokens', label: 'Employee Tokens', category: 'Management', icon: KeyIcon, component: <Tokens /> },
       ];
-  const [active, setActive] = useState(tabs[0][0]);
+
+  const [activeId, setActiveId] = useState(navItems[0].id);
+  const activeItem = navItems.find((n) => n.id === activeId) ?? navItems[0];
+
+  // Enable directional real-time scroll reveal animations
+  useScrollReveal(activeId);
+
+  // Group items by category
+  const categories = Array.from(new Set(navItems.map((i) => i.category)));
 
   return (
-    <div class="app">
-      <header class="topbar">
-        <div class="brand">
-          <span class="brand-mark"><LayersIcon /></span>
-          <div>
-            <div class="brand-name">Vanguard</div>
-            <div class="brand-sub">{isCompany ? 'Company Admin' : 'Department Admin'}</div>
+    <div class="app-shell">
+      {/* Collapsible Left Sidebar */}
+      <aside class={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+        <div class="sidebar-head">
+          {!collapsed ? (
+            <>
+              <div class="sidebar-brand">
+                <span class="sidebar-brand-icon"><LayersIcon /></span>
+                <span class="sidebar-brand-text">Vanguard</span>
+              </div>
+              <button
+                class="toggle-btn"
+                onClick={() => setCollapsed(true)}
+                title="Collapse Sidebar"
+                aria-label="Collapse Sidebar"
+              >
+                <ChevronLeftIcon />
+              </button>
+            </>
+          ) : (
+            <button
+              class="sidebar-brand-icon collapsed-toggle-btn"
+              onClick={() => setCollapsed(false)}
+              title="Expand Sidebar"
+              aria-label="Expand Sidebar"
+            >
+              <ChevronRightIcon />
+            </button>
+          )}
+        </div>
+
+        <nav class="sidebar-nav">
+          {categories.map((cat) => (
+            <div class="nav-group" key={cat}>
+              <div class="nav-section-title">{cat}</div>
+              {navItems
+                .filter((item) => item.category === cat)
+                .map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.id}
+                      class={`nav-item ${activeId === item.id ? 'active' : ''}`}
+                      onClick={() => setActiveId(item.id)}
+                      title={item.label}
+                    >
+                      <Icon />
+                      <span class="nav-item-text">{item.label}</span>
+                    </button>
+                  );
+                })}
+            </div>
+          ))}
+        </nav>
+      </aside>
+
+      {/* Main Content Area */}
+      <div class="main-wrap">
+        {/* Upper Header Bar */}
+        <header class="topbar">
+          <div class="breadcrumbs">
+            <span class="crumb-root">{activeItem.category}</span>
+            <span class="sep"><ChevronRightIcon style="width:14px;height:14px" /></span>
+            <span class="crumb-active">{activeItem.label}</span>
           </div>
-        </div>
-        <div class="topbar-right">
-          <span class="chip"><span class="dot" style="background:#4f46e5"></span> <strong>{session.org_name}</strong></span>
-          {!isCompany && <span class="chip"><strong>{session.department}</strong></span>}
-          <button class="btn-sm" onClick={onLogout}>Sign out</button>
-        </div>
-      </header>
 
-      <nav class="tabs">
-        {tabs.map(([id, label, Icon]) => (
-          <button key={id} class={active === id ? 'active' : ''} onClick={() => setActive(id)}>
-            <Icon /> {label}
-          </button>
-        ))}
-      </nav>
+          <div class="topbar-right">
+            <span class="chip live"><span class="dot"></span> <strong>Live Guard</strong></span>
+            <span class="chip">Org: <strong>{session.org_name}</strong></span>
+            {!isCompany && <span class="chip">Dept: <strong>{session.department}</strong></span>}
+            <button class="btn-signout" onClick={onLogout}>Sign Out</button>
+          </div>
+        </header>
 
-      <main>{tabs.find((t) => t[0] === active)![3]}</main>
+        {/* Content Canvas with Page View Transition Animation */}
+        <main class="main-content">
+          <div key={activeId} class="page-transition-wrap">
+            {activeItem.component}
+          </div>
+        </main>
+      </div>
     </div>
   );
 }
