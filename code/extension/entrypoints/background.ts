@@ -23,6 +23,8 @@ async function ensureOffscreen(): Promise<void> {
   });
 }
 
+import { setupKeepAliveServer } from '../src/util/keepalive';
+
 // 🔴 The service worker owns ALL configuration (ADR 0030). The offscreen document has no
 // chrome.storage — measured 2026-07-20 — so it cannot read its own settings, and a read there
 // throws in a way the old code reported as "feature off". Cached because scans run at
@@ -35,6 +37,7 @@ async function config(): Promise<SensitivityConfig> {
 
 export default defineBackground(() => {
   console.info('[vanguard] background alive');
+  setupKeepAliveServer();
 
   // First run: land the user on the Personal/Enterprise chooser in Options.
   chrome.runtime.onInstalled.addListener((details) => {

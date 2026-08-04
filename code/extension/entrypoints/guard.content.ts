@@ -4,6 +4,7 @@ import { toolForHost } from '../src/policy/lookup';
 import type { PolicyRequest, PolicyResponse } from '../src/policy/messages';
 import type { Enrolment, GovernanceEvent, Policy } from '../src/policy/types';
 import { hideWarnBanner, showWarnBanner } from '../src/ui/warn-banner';
+import { setupKeepAliveClient } from '../src/util/keepalive';
 
 /** Every registry host. Keep in step with code/policy/app/seed.py's REGISTRY. */
 const REGISTRY_MATCHES = [
@@ -32,6 +33,11 @@ export default defineContentScript({
   async main() {
     const caps = capabilitiesFor((await getMode()) ?? 'personal');
     if (!caps.toolPolicy) return;   // Personal: no warn banner, no polling, no events
+
+    // Enterprise only, and deliberately after the gate above: the keep-alive
+    // port exists to hold the worker up for policy polling, which Personal
+    // mode never does.
+    setupKeepAliveClient();
 
     let shownFor: string | null = null;   // llm_id the banner is currently up for
     let dismissed = false;                // per page load; a reload warns again

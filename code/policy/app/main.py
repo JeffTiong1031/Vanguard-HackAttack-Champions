@@ -1,4 +1,9 @@
 import logging
+import mimetypes
+
+# Fix Windows registry MIME type issue where .js files default to text/plain
+mimetypes.add_type("text/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError

@@ -32,7 +32,7 @@ def test_oversized_upload_is_rejected_with_a_human_message():
 
 
 def test_unsupported_type_is_415_and_names_what_is_supported():
-    r = _post("photo.jpg", b"\xff\xd8\xff\xe0blah")
+    r = _post("binary.exe", b"MZ\x90\x00\x03\x00\x00\x00")
     assert r.status_code == 415
     assert r.json()["error"]["code"] == "unsupported_type"
 

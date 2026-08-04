@@ -51,7 +51,7 @@ export type ExtractResponse = {
   extract_sha256: string;
   chars: number;
   truncated: boolean;
-  format: 'txt' | 'csv' | 'docx' | 'pdf';
+  format: 'txt' | 'csv' | 'docx' | 'pdf' | 'xlsx' | 'image';
   coverage: Coverage;
   warnings: string[];
 };

@@ -85,4 +85,23 @@ describe('processFile', () => {
     expect(store.get(id)!.coverage!.not_read).toEqual(['4 pages with no text layer (no OCR)']);
     expect(store.get(id)!.truncated).toBe(true);
   });
+
+  it('processes image file with OCR extract format', async () => {
+    const store = new FileStore();
+    const id = store.add(new File(['fake image bytes'], 'screenshot.png', { type: 'image/png' }));
+    await processFile(store, id, {
+      extract: async () => ({
+        extract: 'Confidential NRIC 880101-14-5566', chars: 32, truncated: false, format: 'image' as const,
+        coverage: { read: ['OCR text layer'], not_read: [], pages_total: 1, pages_with_text: 1 },
+        warnings: [],
+      }),
+      scan: async () => ({
+        state: 'DIRTY' as const, complete: true,
+        findings: [{ cls: 'NRIC' as const, start: 18, end: 32, text: '880101-14-5566' }],
+      }),
+    });
+    expect(store.get(id)!.status.kind).toBe('scanned');
+    expect(store.get(id)!.findings).toHaveLength(1);
+    expect(store.get(id)!.findings![0].cls).toBe('NRIC');
+  });
 });
