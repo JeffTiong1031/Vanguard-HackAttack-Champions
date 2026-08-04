@@ -27,32 +27,37 @@ export function Signup({ onBack }: { onBack: () => void }) {
           <span class="brand-mark"><LayersIcon /></span>
           <div>
             <div class="brand-name">Vanguard</div>
-            <div class="brand-sub">AI Governance</div>
+            <div class="brand-sub">Governance Console</div>
           </div>
         </div>
 
         {!secret ? (
           <form onSubmit={submit}>
-            <h1 class="login-title">Create a company</h1>
-            <p class="login-caption">We generate your Company Admin secret. Save it — it is shown once.</p>
-            <label>Company name<input value={name}
-              placeholder="e.g. Acme Corp"
-              onInput={(e) => setName((e.target as HTMLInputElement).value)} /></label>
-            <button type="submit" disabled={busy || !name.trim()}>Create company</button>
+            <h1 class="login-title">Provision New Organization</h1>
+            <p class="login-caption">Generate your root Company Admin master secret key. Store it securely.</p>
+            <label>
+              Organization / Company Name
+              <input
+                value={name}
+                placeholder="e.g. Vanguard Security Corp"
+                onInput={(e) => setName((e.target as HTMLInputElement).value)}
+              />
+            </label>
+            <button type="submit" class="btn-primary" disabled={busy || !name.trim()}>Generate Master Secret</button>
             {error && <p class="error">{error}</p>}
-            <p class="login-caption" style="margin-top:12px">
-              <a href="#" onClick={(e) => { e.preventDefault(); onBack(); }}>Back to sign in</a>
+            <p class="login-caption" style="margin-top:18px">
+              <a href="#" onClick={(e) => { e.preventDefault(); onBack(); }} style="color:var(--primary);font-weight:700">← Back to Authentication</a>
             </p>
           </form>
         ) : (
           <div>
-            <h1 class="login-title">Company created</h1>
+            <h1 class="login-title">Organization Provisioned</h1>
             <div class="mint-result">
-              <strong>Copy this Company Admin secret now — it will not be shown again.</strong><br />
-              Sign in with the <em>Company Admin</em> role and paste it.
+              <strong>Save this Master Company Secret immediately (shown only once):</strong><br />
+              Use this key under <em>Company Admin</em> to sign in.
               <code>{secret}</code>
             </div>
-            <button onClick={onBack}>I&apos;ve saved it — go to sign in</button>
+            <button class="btn-primary" style="width:100%;margin-top:16px" onClick={onBack}>I&apos;ve Saved My Secret — Continue to Sign In</button>
           </div>
         )}
       </div>

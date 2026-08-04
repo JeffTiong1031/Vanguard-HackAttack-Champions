@@ -31,31 +31,37 @@ export function Login({ onDone, onCreate }: { onDone: (s: Session) => void; onCr
           <span class="brand-mark"><LayersIcon /></span>
           <div>
             <div class="brand-name">Vanguard</div>
-            <div class="brand-sub">AI Governance</div>
+            <div class="brand-sub">Governance Console</div>
           </div>
         </div>
-        <h1 class="login-title">Sign in</h1>
-        <p class="login-caption">Choose your role, then paste your access secret.</p>
+        <h1 class="login-title">Console Authentication</h1>
+        <p class="login-caption">Select your administrative role and enter your security secret key.</p>
 
-        {/* The unselected button must be `btn-ghost`, not `''`: an empty class
-            falls through to the default `button` rule, which is the same indigo
-            gradient as `.btn-primary` — making both look selected. */}
-        <div class="role-toggle" style="display:flex;gap:8px;margin-bottom:12px">
+        <div class="role-toggle">
           <button type="button" aria-pressed={role === 'company'}
             class={role === 'company' ? 'btn-primary role-on' : 'btn-ghost'}
-            style="flex:1" onClick={() => setRole('company')}>Company Admin</button>
+            onClick={() => setRole('company')}>Company Admin</button>
           <button type="button" aria-pressed={role === 'department'}
             class={role === 'department' ? 'btn-primary role-on' : 'btn-ghost'}
-            style="flex:1" onClick={() => setRole('department')}>Department Admin</button>
+            onClick={() => setRole('department')}>Department Admin</button>
         </div>
 
-        <label>Access secret<input type="password" value={secret}
-          placeholder="Paste the secret you were given"
-          onInput={(e) => setSecret((e.target as HTMLInputElement).value)} /></label>
-        <button type="submit">Sign in</button>
+        <label>
+          Access Secret Key
+          <input
+            type="password"
+            value={secret}
+            placeholder="Paste your assigned secret key…"
+            onInput={(e) => setSecret((e.target as HTMLInputElement).value)}
+          />
+        </label>
+        
+        <button type="submit" class="btn-primary">Authenticate & Access Console</button>
+        
         {error && <p class="error">{error}</p>}
-        <p class="login-caption" style="margin-top:12px">
-          New company? <a href="#" onClick={(e) => { e.preventDefault(); onCreate(); }}>Create one</a>.
+        
+        <p class="login-caption" style="margin-top:18px">
+          Need to register a new organization? <a href="#" onClick={(e) => { e.preventDefault(); onCreate(); }} style="color:var(--primary);font-weight:700">Provision Organization</a>.
         </p>
       </form>
     </div>
