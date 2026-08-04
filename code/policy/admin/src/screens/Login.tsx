@@ -37,12 +37,15 @@ export function Login({ onDone, onCreate }: { onDone: (s: Session) => void; onCr
         <h1 class="login-title">Sign in</h1>
         <p class="login-caption">Choose your role, then paste your access secret.</p>
 
+        {/* The unselected button must be `btn-ghost`, not `''`: an empty class
+            falls through to the default `button` rule, which is the same indigo
+            gradient as `.btn-primary` — making both look selected. */}
         <div class="role-toggle" style="display:flex;gap:8px;margin-bottom:12px">
-          <button type="button"
-            class={role === 'company' ? 'btn-primary' : ''}
+          <button type="button" aria-pressed={role === 'company'}
+            class={role === 'company' ? 'btn-primary role-on' : 'btn-ghost'}
             style="flex:1" onClick={() => setRole('company')}>Company Admin</button>
-          <button type="button"
-            class={role === 'department' ? 'btn-primary' : ''}
+          <button type="button" aria-pressed={role === 'department'}
+            class={role === 'department' ? 'btn-primary role-on' : 'btn-ghost'}
             style="flex:1" onClick={() => setRole('department')}>Department Admin</button>
         </div>
 

@@ -196,6 +196,14 @@ button:hover:not(:disabled), .btn-primary:hover { filter: brightness(1.05); box-
 }
 .btn-danger:hover:not(:disabled) { background: var(--red-bg); border-color: #eab0b0; filter: none; box-shadow: var(--shadow-sm); }
 .btn-sm { padding: 6px 11px; font-size: 12.5px; }
+
+/* ---- role toggle (login) --------------------------------------------------- */
+/* The selected role gets a focus ring + tick so the choice reads at a glance;
+   the unselected one is a plain ghost button. */
+.role-toggle .role-on {
+  box-shadow: 0 0 0 3px rgb(79 70 229 / 25%), 0 6px 16px -6px rgb(79 70 229 / 65%);
+}
+.role-toggle .role-on::before { content: "✓"; font-weight: 800; margin-right: 3px; }
 .row-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
 /* ---- inputs --------------------------------------------------------------- */
