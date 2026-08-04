@@ -33,7 +33,7 @@ export function AiUsage({ scope }: { scope: Scope }) {
       </div>
       <RangeSelector days={days} onChange={setDays} />
       {error && <p class="error">{error}</p>}
-      <LineChart title="Usage trend by department" series={trend.series} />
+      <LineChart title="Usage trend by department" series={trend.series} labels={trend.dates} />
       <Bars title="Top apps / domains" rows={data.top_apps.map((a) => ({ label: a.host, value: a.events }))} />
       <Bars title="Top employees" rows={data.top_employees.map((e) => ({ label: `${e.name} · ${e.department}`, value: e.events }))} />
     </section>

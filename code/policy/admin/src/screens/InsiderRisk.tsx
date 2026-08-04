@@ -26,11 +26,13 @@ export function InsiderRisk({ scope }: { scope: Scope }) {
   if (!data) return <section class="panel"><p class="empty">{error || 'Loading…'}</p></section>;
 
   const riskLine = [{ department: 'Risk', points: data.risk_timeline.map((r) => r.risk) }];
+  const riskDates = data.risk_timeline.map((r) => r.date);
   const alertLines = [
     { department: 'High', points: data.alerts_timeline.map((r) => r.high) },
     { department: 'Medium', points: data.alerts_timeline.map((r) => r.medium) },
     { department: 'Low', points: data.alerts_timeline.map((r) => r.low) },
   ];
+  const alertDates = data.alerts_timeline.map((r) => r.date);
 
   return (
     <section class="panel">
@@ -46,8 +48,8 @@ export function InsiderRisk({ scope }: { scope: Scope }) {
       <p class="hint">{WEIGHTS}</p>
       {error && <p class="error">{error}</p>}
 
-      <LineChart title="Risk score timeline" series={riskLine} />
-      <LineChart title="Alerts timeline (by severity)" series={alertLines} />
+      <LineChart title="Risk score timeline" series={riskLine} labels={riskDates} />
+      <LineChart title="Alerts timeline (by severity)" series={alertLines} labels={alertDates} />
       <Bars title="Top risky employees"
             rows={data.top_employees.map((e) => ({ label: `${e.name} · ${e.department}`, value: e.risk }))} />
       {scope === 'company' && (
