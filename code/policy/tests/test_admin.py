@@ -1,4 +1,4 @@
-import uuid
+﻿import uuid
 
 from fastapi.testclient import TestClient
 
@@ -29,12 +29,12 @@ def test_every_admin_route_refuses_an_unauthenticated_caller():
 def test_approving_a_tool_bumps_the_policy_version():
     c, org_id = _company_client()
     before = get_conn().execute(
-        "SELECT policy_version AS v FROM orgs WHERE id = ?", (org_id,)
+        "SELECT policy_version AS v FROM orgs WHERE id = %s", (org_id,)
     ).fetchone()["v"]
     r = c.post("/v1/admin/tools/google", json={"status": "approved"})
     assert r.status_code == 200
     after = get_conn().execute(
-        "SELECT policy_version AS v FROM orgs WHERE id = ?", (org_id,)
+        "SELECT policy_version AS v FROM orgs WHERE id = %s", (org_id,)
     ).fetchone()["v"]
     assert after > before
 
@@ -47,14 +47,14 @@ def test_setting_an_unknown_tool_is_404_and_does_not_bump_the_version():
     already 404s an unknown llm_id."""
     c, org_id = _company_client()
     before = get_conn().execute(
-        "SELECT policy_version AS v FROM orgs WHERE id = ?", (org_id,)
+        "SELECT policy_version AS v FROM orgs WHERE id = %s", (org_id,)
     ).fetchone()["v"]
 
     r = c.post("/v1/admin/tools/NOT_A_TOOL", json={"status": "approved"})
     assert r.status_code == 404
 
     after = get_conn().execute(
-        "SELECT policy_version AS v FROM orgs WHERE id = ?", (org_id,)
+        "SELECT policy_version AS v FROM orgs WHERE id = %s", (org_id,)
     ).fetchone()["v"]
     assert after == before
 

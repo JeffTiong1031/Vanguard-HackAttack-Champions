@@ -168,7 +168,7 @@ td .name { font-weight: 600; color: var(--ink); }
 }
 .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .9; }
 .pill.approved, .pill.active   { background: var(--green-bg); color: var(--green-fg); }
-.pill.blocked,  .pill.denied   { background: var(--red-bg);   color: var(--red-fg); }
+.pill.blocked { background: var(--red-bg); color: var(--red-fg); }
 .pill.pending                  { background: var(--amber-bg); color: var(--amber-fg); }
 .pill.revoked                  { background: var(--slate-bg); color: var(--slate-fg); }
 

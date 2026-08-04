@@ -26,7 +26,7 @@ async def get_policy(
     """
     conn = get_conn()
     row = conn.execute(
-        "SELECT policy_version FROM orgs WHERE id = ?", (org_id,)
+        "SELECT policy_version FROM orgs WHERE id = %s", (org_id,)
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="unknown org")

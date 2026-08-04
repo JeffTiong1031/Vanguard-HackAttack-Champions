@@ -7,7 +7,7 @@ tomorrow.
 """
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class EnrollRequest(BaseModel):
@@ -49,7 +49,31 @@ class AccessRequestCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     pseudo_id: str
     llm_id: str
-    reason: str = Field(max_length=500)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+DecisionReason = Literal[
+    "policy_requirement_not_met",
+    "prohibited_use",
+    "insufficient_evidence",
+    "scope_mismatch",
+    "other",
+]
+
+
+class BinaryDecision(BaseModel):
+    """A durable access decision. There is no provisional third outcome."""
+
+    model_config = ConfigDict(extra="forbid")
+    decision: Literal["approved", "blocked"]
+    reason_code: Optional[DecisionReason] = None
+    note: Optional[str] = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def blocked_decisions_explain_the_next_step(self):
+        if self.decision == "blocked" and (not self.reason_code or not (self.note or "").strip()):
+            raise ValueError("blocked decisions require reason_code and an actionable note")
+        return self
 
 
 class UsageEvent(BaseModel):
@@ -105,20 +129,30 @@ class AppealCreate(BaseModel):
     pseudo_id: str
     decision_type: Literal["ethics", "pii"]
     category: str
-    reason: str = Field(max_length=500)
+    reason: str = Field(min_length=1, max_length=500)
     disclosed_text: Optional[str] = Field(default=None, max_length=4000)
-    # A hash of the prompt (never the prompt itself). Lets an overturned ethics
-    # appeal grant a one-time pass on that exact prompt. I3: a hash, not text.
-    prompt_hash: Optional[str] = Field(default=None, max_length=64)
+    # Defines the exact, persistent approval scope without carrying prompt text.
+    scope_fingerprint: Optional[str] = Field(default=None, min_length=64, max_length=64)
+
+    @field_validator("scope_fingerprint")
+    @classmethod
+    def _scope_is_hex64(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        if any(c not in "0123456789abcdef" for c in value.lower()):
+            raise ValueError("scope_fingerprint must be a 64-character hex digest")
+        return value.lower()
+
+    @model_validator(mode="after")
+    def ethics_appeals_have_a_fixed_scope(self):
+        if self.decision_type == "ethics" and self.scope_fingerprint is None:
+            raise ValueError("ethics appeals require scope_fingerprint")
+        return self
 
 
-class AppealDecision(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    decision: Literal["upheld", "overturned"]
-    note: Optional[str] = Field(default=None, max_length=500)
+class AccessDecision(BinaryDecision):
+    pass
 
 
-class AllowanceConsume(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    pseudo_id: str
-    prompt_hash: str = Field(max_length=64)
+class AppealDecision(BinaryDecision):
+    pass

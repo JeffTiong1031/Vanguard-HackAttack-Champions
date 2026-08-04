@@ -17,7 +17,7 @@ def _world():
         eid = get_conn().execute("SELECT id FROM employees WHERE pseudo_id=?", (pid,)).fetchone()["id"]
         get_conn().execute(
             "INSERT INTO usage_events (id, org_id, employee_id, host, type, category, finding_hash, ts)"
-            " VALUES (?, ?, ?, 'chatgpt.com', 'pii_block', NULL, NULL, datetime('now'))",
+            " VALUES (%s, %s, %s, 'chatgpt.com', 'pii_block', NULL, NULL, datetime('now'))",
             (uuid.uuid4().hex, org_id, eid))
     get_conn().commit()
     co = TestClient(app); co.post("/v1/admin/login", json={"role": "company", "secret": co_secret})

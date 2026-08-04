@@ -21,9 +21,12 @@ def test_dept_admin_decides_its_own_appeal():
     org_id, dept_id, pseudo, dc = _setup()
     appeal_id = emp.post("/v1/appeals", json={
         "pseudo_id": pseudo, "decision_type": "ethics",
-        "category": "security_evasion", "reason": "false positive"}).json()["id"]
+        "category": "security_evasion", "reason": "false positive",
+        "scope_fingerprint": "a" * 64}).json()["id"]
     assert any(a["id"] == appeal_id for a in dc.get("/v1/dept/appeals").json())
-    r = dc.post(f"/v1/dept/appeals/{appeal_id}", json={"decision": "overturned", "note": "ok"})
-    assert r.status_code == 200 and r.json()["status"] == "overturned"
+    r = dc.post(f"/v1/dept/appeals/{appeal_id}", json={"decision": "approved", "note": "ok"})
+    assert r.status_code == 200 and r.json()["status"] == "approved"
     # second decision on a decided appeal is 409
-    assert dc.post(f"/v1/dept/appeals/{appeal_id}", json={"decision": "upheld"}).status_code == 409
+    assert dc.post(f"/v1/dept/appeals/{appeal_id}", json={
+        "decision": "blocked", "reason_code": "policy_requirement_not_met", "note": "Still prohibited."
+    }).status_code == 409

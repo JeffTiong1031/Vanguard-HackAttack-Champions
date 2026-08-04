@@ -62,7 +62,8 @@ export type TokenRow = {
   id: string; department: string; label: string; name?: string; created_at: string; revoked: number;
 };
 export type RequestRow = {
-  id: string; reason: string; status: 'pending' | 'approved' | 'denied';
+  id: string; reason: string; status: 'pending' | 'approved' | 'blocked';
+  access_state: 'approved' | 'blocked'; reason_code: string | null; admin_note: string | null;
   created_at: string; department: string; display_name: string;
   host: string; llm_id: string;
 };
@@ -73,7 +74,8 @@ export type Usage = {
 };
 export type AppealRow = {
   id: string; decision_type: string; category: string; employee_reason: string;
-  disclosed_text: string | null; status: 'pending' | 'upheld' | 'overturned';
+  disclosed_text: string | null; status: 'pending' | 'approved' | 'blocked';
+  access_state: 'approved' | 'blocked'; reason_code: string | null;
   admin_note: string | null; created_at: string; department: string;
 };
 

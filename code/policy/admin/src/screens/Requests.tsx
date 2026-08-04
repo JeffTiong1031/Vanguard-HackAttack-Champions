@@ -8,6 +8,7 @@ export function Requests({ scope }: { scope: Scope }) {
   const [rows, setRows] = useState<RequestRow[]>([]);
   const [busyId, setBusyId] = useState('');
   const [error, setError] = useState('');
+  const [notes, setNotes] = useState<Record<string, string>>({});
   const seq = useRef(0);
 
   async function load() {
@@ -28,10 +29,12 @@ export function Requests({ scope }: { scope: Scope }) {
     return () => clearInterval(timer);
   }, [base]);
 
-  async function decide(id: string, decision: 'approved' | 'denied') {
+  async function decide(id: string, decision: 'approved' | 'blocked') {
     setBusyId(id); setError('');
     try {
-      await api.post(`${base}/${id}`, { decision });
+      await api.post(`${base}/${id}`, decision === 'blocked'
+        ? { decision, reason_code: 'policy_requirement_not_met', note: notes[id]?.trim() }
+        : { decision });
       await load();
     } catch (err) {
       if (err instanceof UnauthorisedError) throw err;
@@ -49,7 +52,7 @@ export function Requests({ scope }: { scope: Scope }) {
           <h2>Access Requests</h2>
           <p class="sub">{readOnly
             ? 'Every department’s requests, across the company (read-only). Departments approve their own.'
-            : 'Employees request a blocked tool; approve to unblock it for this department.'}</p>
+            : 'Employees request a blocked tool. Access stays blocked until you commit Approved.'}</p>
         </div>
         <span class="tag count">{pending.length} pending</span>
       </div>
@@ -67,12 +70,21 @@ export function Requests({ scope }: { scope: Scope }) {
                 <td><code>{new Date(r.created_at).toLocaleTimeString()}</code></td>
                 <td>
                   {r.status === 'pending' && !readOnly ? (
-                    <div class="row-actions">
-                      <button class="btn-primary btn-sm" disabled={busyId === r.id} onClick={() => decide(r.id, 'approved')}>Approve</button>
-                      <button class="btn-danger btn-sm" disabled={busyId === r.id} onClick={() => decide(r.id, 'denied')}>Deny</button>
+                    <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+                      <input placeholder="Required explanation when blocked"
+                        value={notes[r.id] ?? ''}
+                        onInput={(e) => setNotes({ ...notes, [r.id]: (e.target as HTMLInputElement).value })}
+                        style="width:220px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12.5px" />
+                      <div class="row-actions">
+                        <button class="btn-primary btn-sm" disabled={busyId === r.id} onClick={() => decide(r.id, 'approved')}>Approve</button>
+                        <button class="btn-danger btn-sm" disabled={busyId === r.id || !notes[r.id]?.trim()} onClick={() => decide(r.id, 'blocked')}>Keep blocked</button>
+                      </div>
                     </div>
                   ) : (
-                    <span class={`pill ${r.status}`}>{r.status}</span>
+                    <div><span class={`pill ${r.access_state}`}>{r.access_state}</span>
+                      {r.status === 'pending' && <div style="font-size:12px;color:#64748b;margin-top:4px">Review in progress</div>}
+                      {r.admin_note && <div style="font-size:12px;color:#475569;margin-top:4px">{r.admin_note}</div>}
+                    </div>
                   )}
                 </td>
               </tr>

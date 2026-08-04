@@ -9,3 +9,6 @@ app/static/
 DEMO-TOKENS.md
 server.log
 jar.txt
+
+# Supabase / Postgres credentials — never commit
+.env

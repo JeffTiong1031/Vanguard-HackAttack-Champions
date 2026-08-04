@@ -53,12 +53,12 @@ def build_demo_world(company: str = "Acme Corp", out_path: Path = DEFAULT_OUT) -
         for i, tok in enumerate(d["tokens"]):
             # label the token, then enrol a pseudonymous employee that inherits the name
             person = names[i % len(names)]
-            conn.execute("UPDATE enroll_tokens SET name = ? WHERE token_hash = ?",
+            conn.execute("UPDATE enroll_tokens SET name = %s WHERE token_hash = %s",
                          (person, hash_token(tok)))
             emp_id, pseudo = uuid.uuid4().hex, uuid.uuid4().hex
             conn.execute(
                 "INSERT INTO employees (id, org_id, pseudo_id, department, department_id, name, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                " VALUES (%s, %s, %s, %s, %s, %s, %s)",
                 (emp_id, org_id, pseudo, d["name"], d["id"], person,
                  datetime.now(timezone.utc).isoformat()))
             # Spread events over SEED_DAYS with day-to-day variance, a quiet
@@ -75,7 +75,7 @@ def build_demo_world(company: str = "Acme Corp", out_path: Path = DEFAULT_OUT) -
                     host = rng.choices(HOSTS, HOST_W)[0]
                     conn.execute(
                         "INSERT INTO usage_events (id, org_id, employee_id, host, type, category, finding_hash, ts)"
-                        " VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
+                        " VALUES (%s, %s, %s, %s, %s, %s, NULL, %s)",
                         (uuid.uuid4().hex, org_id, emp_id, host, etype,
                          "covert_surveillance" if etype == "ethics_block" else None, ts))
     conn.commit()

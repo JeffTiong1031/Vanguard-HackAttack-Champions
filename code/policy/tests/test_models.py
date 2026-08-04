@@ -79,7 +79,7 @@ from app.models import AppealCreate, AppealDecision
 
 
 def test_appeal_create_defaults_disclosed_text_to_none():
-    a = AppealCreate(pseudo_id="p1", decision_type="ethics", category="covert_surveillance", reason="I meant defence")
+    a = AppealCreate(pseudo_id="p1", decision_type="ethics", category="covert_surveillance", reason="I meant defence", scope_fingerprint="a" * 64)
     assert a.disclosed_text is None
 
 
@@ -93,7 +93,12 @@ def test_appeal_create_rejects_bad_decision_type():
         AppealCreate(pseudo_id="p1", decision_type="tool", category="x", reason="ok")
 
 
-def test_appeal_decision_only_allows_two_verdicts():
-    assert AppealDecision(decision="overturned").note is None
+def test_appeal_decision_only_allows_binary_verdicts():
+    assert AppealDecision(decision="approved").note is None
+    assert AppealDecision(
+        decision="blocked", reason_code="policy_requirement_not_met", note="Use an approved tool."
+    ).decision == "blocked"
     with pytest.raises(ValidationError):
         AppealDecision(decision="maybe")
+    with pytest.raises(ValidationError):
+        AppealDecision(decision="blocked")

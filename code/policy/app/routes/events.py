@@ -21,7 +21,7 @@ router = APIRouter()
 async def ingest(batch: EventBatch) -> dict[str, int]:
     conn = get_conn()
     row = conn.execute(
-        "SELECT id, org_id FROM employees WHERE pseudo_id = ?", (batch.pseudo_id,)
+        "SELECT id, org_id FROM employees WHERE pseudo_id = %s", (batch.pseudo_id,)
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=401, detail="unknown enrolment")
@@ -29,7 +29,7 @@ async def ingest(batch: EventBatch) -> dict[str, int]:
     conn.executemany(
         "INSERT INTO usage_events"
         " (id, org_id, employee_id, host, type, category, finding_hash, ts)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
         [
             (uuid.uuid4().hex, row["org_id"], row["id"], e.host, e.type,
              e.category, e.finding_hash, e.ts)

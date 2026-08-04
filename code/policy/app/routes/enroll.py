@@ -20,7 +20,7 @@ async def enroll(body: EnrollRequest) -> EnrollResponse:
     conn = get_conn()
     row = conn.execute(
         "SELECT org_id, department, department_id, name FROM enroll_tokens"
-        " WHERE token_hash = ? AND revoked = 0",
+        " WHERE token_hash = %s AND revoked = 0",
         (hash_token(body.token),),
     ).fetchone()
     if row is None:
@@ -31,7 +31,7 @@ async def enroll(body: EnrollRequest) -> EnrollResponse:
     pseudo_id = uuid.uuid4().hex
     conn.execute(
         "INSERT INTO employees (id, org_id, pseudo_id, department, department_id, name, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        " VALUES (%s, %s, %s, %s, %s, %s, %s)",
         (employee_id, row["org_id"], pseudo_id, row["department"], row["department_id"], row["name"], now_iso()),
     )
     conn.commit()

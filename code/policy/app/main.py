@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.requests import Request
 
+from app.db import migrate_schema
 from app.deps import get_conn
 
 # No APM, no body capture. Same posture as code/backend/app/main.py, and this
@@ -75,6 +76,16 @@ async def _validation_error(request: Request, exc: RequestValidationError) -> JS
         for error in exc.errors()
     ]
     return JSONResponse(status_code=422, content={"detail": scrubbed})
+
+
+@app.on_event("startup")
+async def _startup() -> None:
+    """Apply any outstanding incremental schema migrations on boot."""
+    try:
+        migrate_schema(get_conn())
+        log.info("schema migrations applied")
+    except Exception as exc:
+        log.warning("schema migration skipped: %s", exc)
 
 
 @app.get("/healthz")
