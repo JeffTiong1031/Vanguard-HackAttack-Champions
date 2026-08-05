@@ -42,3 +42,12 @@ def test_schema_is_idempotent():
     """init_schema uses CREATE TABLE IF NOT EXISTS — calling it again must not raise."""
     conn = get_conn()
     init_schema(conn)  # second call — must not raise
+
+
+def test_employees_has_enroll_token_id():
+    """The link that makes revocation and coverage possible."""
+    conn = get_conn()
+    cols = {r["column_name"] for r in conn.execute(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = 'employees'"
+    ).fetchall()}
+    assert "enroll_token_id" in cols

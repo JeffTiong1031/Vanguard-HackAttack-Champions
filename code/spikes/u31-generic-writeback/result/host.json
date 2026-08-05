@@ -1,0 +1,162 @@
+[
+  {
+    "marker": "VG_U31_2m1pn4",
+    "host": "chatgpt.com",
+    "at": "2026-08-05T16:24:02.122Z",
+    "composerFound": true,
+    "composerKind": "last-focused",
+    "composerDescriptor": {
+      "tag": "div",
+      "id": "prompt-textarea",
+      "firstClass": "ProseMirror",
+      "width": 495,
+      "height": 42
+    },
+    "before": "sdhsjdhsjhdsjdhs",
+    "execCommandReturned": true,
+    "readBack": "VG_U31_2m1pn4",
+    "matches": true,
+    "stillConnected": true,
+    "frameworkHint": null
+  },
+  {
+    "marker": "VG_U31_bqucds",
+    "host": "claude.ai",
+    "at": "2026-08-05T16:26:21.122Z",
+    "composerFound": true,
+    "composerKind": "last-focused",
+    "composerDescriptor": {
+      "tag": "div",
+      "id": null,
+      "firstClass": "tiptap",
+      "width": 621,
+      "height": 22
+    },
+    "before": "dkfdsfksjfksjfksjfkjdfhjdhfjdhfjdhjd",
+    "execCommandReturned": true,
+    "readBack": "VG_U31_bqucds",
+    "matches": true,
+    "stillConnected": true,
+    "frameworkHint": null
+  },
+  {
+    "marker": "VG_U31_gsml4p",
+    "host": "chat.deepseek.com",
+    "at": "2026-08-05T16:28:50.468Z",
+    "composerFound": true,
+    "composerKind": "last-focused",
+    "composerDescriptor": {
+      "tag": "textarea",
+      "id": null,
+      "firstClass": "_27c9245",
+      "width": 647,
+      "height": 60
+    },
+    "before": "dksjdksjdksjdkjdksj",
+    "execCommandReturned": true,
+    "readBack": "VG_U31_gsml4p",
+    "matches": true,
+    "stillConnected": true,
+    "frameworkHint": null
+  },
+  {
+    "marker": "VG_U31_0jghi4",
+    "host": "chat.mistral.ai",
+    "at": "2026-08-05T16:29:29.531Z",
+    "composerFound": true,
+    "composerKind": "last-focused",
+    "composerDescriptor": {
+      "tag": "div",
+      "id": null,
+      "firstClass": "ProseMirror",
+      "width": 543,
+      "height": 24
+    },
+    "before": "dshfdshkfshjfkdhkjfhkfdshdkjhjkhkfksdhfkjdshfks",
+    "execCommandReturned": true,
+    "readBack": "VG_U31_0jghi4",
+    "matches": true,
+    "stillConnected": true,
+    "frameworkHint": null
+  },
+  {
+    "marker": "VG_U31_sr2t6z",
+    "host": "copilot.microsoft.com",
+    "at": "2026-08-05T16:31:12.401Z",
+    "composerFound": true,
+    "composerKind": "last-focused",
+    "composerDescriptor": {
+      "tag": "textarea",
+      "id": "userInput",
+      "firstClass": "font-ligatures-none",
+      "width": 682,
+      "height": 22
+    },
+    "before": "sadashdadkahdkshkask",
+    "execCommandReturned": true,
+    "readBack": "VG_U31_sr2t6z",
+    "matches": true,
+    "stillConnected": true,
+    "frameworkHint": null
+  },
+  {
+    "marker": "VG_U31_jt5vgw",
+    "host": "gemini.google.com",
+    "at": "2026-08-05T16:32:06.986Z",
+    "composerFound": true,
+    "composerKind": "last-focused",
+    "composerDescriptor": {
+      "tag": "div",
+      "id": null,
+      "firstClass": "ql-editor",
+      "width": 428,
+      "height": 24
+    },
+    "before": "dfkjsfkjdhfkjshfjkdjkfdshdf",
+    "execCommandReturned": true,
+    "readBack": "VG_U31_jt5vgw",
+    "matches": true,
+    "stillConnected": true,
+    "frameworkHint": null
+  },
+  {
+    "marker": "VG_U31_x4hid0",
+    "host": "grok.com",
+    "at": "2026-08-05T16:33:33.202Z",
+    "composerFound": true,
+    "composerKind": "last-focused",
+    "composerDescriptor": {
+      "tag": "div",
+      "id": null,
+      "firstClass": "tiptap",
+      "width": 332,
+      "height": 44
+    },
+    "before": "asdasjdhkjhdkahkshkad",
+    "execCommandReturned": true,
+    "readBack": "VG_U31_x4hid0",
+    "matches": true,
+    "stillConnected": true,
+    "frameworkHint": null
+  },
+  {
+    "marker": "VG_U31_2s7fsw",
+    "host": "www.perplexity.ai",
+    "at": "2026-08-05T16:34:15.985Z",
+    "composerFound": true,
+    "composerKind": "last-focused",
+    "composerDescriptor": {
+      "tag": "div",
+      "id": "ask-input",
+      "firstClass": "overflow-auto",
+      "width": 407,
+      "height": 52
+    },
+    "before": "sdasdasdsadsadadasdssa",
+    "execCommandReturned": true,
+    "readBack": "VG_U31_2s7fsw",
+    "matches": true,
+    "stillConnected": true,
+    "frameworkHint": null
+  }
+]

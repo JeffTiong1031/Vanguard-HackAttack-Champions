@@ -267,6 +267,8 @@ _COLUMN_ADDS: list[tuple[str, str, str]] = [
      "ALTER TABLE decision_appeals ADD COLUMN IF NOT EXISTS reason_code TEXT"),
     ("usage_events", "risk_level",
      "ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS risk_level TEXT"),
+    ("employees", "enroll_token_id",
+     "ALTER TABLE employees ADD COLUMN IF NOT EXISTS enroll_token_id TEXT"),
 ]
 
 _NOTIFICATIONS_DDL = """
