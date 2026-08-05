@@ -50,7 +50,7 @@ export function DeptTools() {
           value={blocked.length.toLocaleString()}
           sub="Access request required"
           icon={XCircleIcon}
-          color="rose"
+          color="crimson"
         />
       </div>
 
