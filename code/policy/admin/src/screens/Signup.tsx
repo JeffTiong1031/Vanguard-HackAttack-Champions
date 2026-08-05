@@ -25,7 +25,7 @@ export function Signup({ onBack }: { onBack: () => void }) {
       <div class="login-card">
         <div class="brand">
           <span class="brand-mark"><LayersIcon /></span>
-          <div>
+          <div class="brand-text">
             <div class="brand-name">Vanguard</div>
             <div class="brand-sub">Governance Console</div>
           </div>

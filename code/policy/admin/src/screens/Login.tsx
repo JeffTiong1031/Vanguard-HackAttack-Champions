@@ -29,7 +29,7 @@ export function Login({ onDone, onCreate }: { onDone: (s: Session) => void; onCr
       <form class="login-card" onSubmit={submit}>
         <div class="brand">
           <span class="brand-mark"><LayersIcon /></span>
-          <div>
+          <div class="brand-text">
             <div class="brand-name">Vanguard</div>
             <div class="brand-sub">Governance Console</div>
           </div>
@@ -61,7 +61,8 @@ export function Login({ onDone, onCreate }: { onDone: (s: Session) => void; onCr
         {error && <p class="error">{error}</p>}
         
         <p class="login-caption" style="margin-top:18px">
-          Need to register a new organization? <a href="#" onClick={(e) => { e.preventDefault(); onCreate(); }} style="color:var(--primary);font-weight:700">Provision Organization</a>.
+          Need to register a new organization?<br />
+          <a href="#" onClick={(e) => { e.preventDefault(); onCreate(); }} style="color:var(--primary);font-weight:700">Provision Organization.</a>
         </p>
       </form>
     </div>

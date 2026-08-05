@@ -1,6 +1,6 @@
 import { scalePoints } from './chart-helpers';
 import type { AlertRow } from '../api';
-import type { ComponentChildren, JSX } from 'preact';
+import type { JSX } from 'preact';
 
 const SCHEME_COLORS: Record<string, string[]> = {
   crimson: ['#b91c1c', '#dc2626', '#ef4444'],
@@ -21,11 +21,12 @@ export function StatCard({
   value: string | number;
   sub?: string;
   icon: (props: JSX.SVGAttributes<SVGSVGElement>) => JSX.Element;
-  color?: 'indigo' | 'emerald' | 'orange' | 'crimson' | 'cyan';
+  color?: 'indigo' | 'emerald' | 'orange' | 'crimson' | 'cyan' | 'rose';
 }) {
+  const normColor = color === 'rose' ? 'crimson' : color;
   return (
-    <div class={`stat-card stat-${color}`}>
-      <div class={`stat-icon ${color}`}>
+    <div class={`stat-card stat-${normColor}`}>
+      <div class={`stat-icon ${normColor}`}>
         <Icon />
       </div>
       <div class="stat-body">

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, UnauthorisedError, type TokenRow } from '../api';
-import { KeyIcon, UsersIcon, CheckCircleIcon, XCircleIcon } from '../icons';
+import { KeyIcon, CheckCircleIcon, XCircleIcon } from '../icons';
 import { StatCard } from './charts';
 
 export function Tokens() {
@@ -55,7 +55,7 @@ export function Tokens() {
           value={revokedTokens.length.toLocaleString()}
           sub="Disabled for new enrolments"
           icon={XCircleIcon}
-          color="rose"
+          color="crimson"
         />
         <StatCard
           label="Total Minted"

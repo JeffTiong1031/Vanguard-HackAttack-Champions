@@ -13,7 +13,7 @@ import { Tokens } from './screens/Tokens';
 import { DeptTools } from './screens/DeptTools';
 import {
   LayersIcon, ShieldIcon, InboxIcon, BarIcon, KeyIcon, GavelIcon,
-  PanelLeftIcon, ChevronRightIcon, ChevronLeftIcon
+  PanelLeftIcon, ChevronRightIcon
 } from './icons';
 import './style.css';
 
@@ -36,25 +36,14 @@ function useScrollReveal(activeId: string) {
     let lastScrollY = window.scrollY;
     let isScrollingUp = false;
 
-    const updateDirectionClasses = () => {
+    const onScroll = () => {
       const currentScrollY = window.scrollY;
-      if (Math.abs(currentScrollY - lastScrollY) < 2) return;
-      isScrollingUp = currentScrollY < lastScrollY;
-      lastScrollY = currentScrollY;
-
-      const hiddenTargets = document.querySelectorAll('.reveal-target:not(.reveal-in)');
-      hiddenTargets.forEach((el) => {
-        if (isScrollingUp) {
-          el.classList.add('from-top');
-          el.classList.remove('from-bottom');
-        } else {
-          el.classList.add('from-bottom');
-          el.classList.remove('from-top');
-        }
-      });
+      if (Math.abs(currentScrollY - lastScrollY) > 3) {
+        isScrollingUp = currentScrollY < lastScrollY;
+        lastScrollY = currentScrollY;
+      }
     };
-
-    window.addEventListener('scroll', updateDirectionClasses, { passive: true });
+    window.addEventListener('scroll', onScroll, { passive: true });
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -63,40 +52,52 @@ function useScrollReveal(activeId: string) {
           if (entry.isIntersecting) {
             if (isScrollingUp) {
               el.classList.add('from-top');
-              el.classList.remove('from-bottom');
             } else {
-              el.classList.add('from-bottom');
               el.classList.remove('from-top');
             }
-            requestAnimationFrame(() => {
-              el.classList.add('reveal-in');
-            });
+            el.classList.add('reveal-in');
+          } else {
+            el.classList.remove('reveal-in');
+            if (isScrollingUp) {
+              el.classList.add('from-top');
+            } else {
+              el.classList.remove('from-top');
+            }
           }
         });
       },
-      { threshold: 0.05, rootMargin: '0px 0px -20px 0px' }
+      { threshold: 0.05, rootMargin: '0px 0px 0px 0px' }
     );
 
-    // Instant scroll to top on page navigation
-    window.scrollTo({ top: 0 });
+    const observeTargets = () => {
+      const targets = document.querySelectorAll(
+        '.panel, .stat-card, .table-wrap, .bars-group, .hint, .mint-result'
+      );
+      targets.forEach((el, idx) => {
+        const htmlEl = el as HTMLElement;
+        if (!htmlEl.classList.contains('reveal-target')) {
+          htmlEl.classList.add('reveal-target');
+          htmlEl.style.transitionDelay = `${Math.min(idx * 0.02, 0.08)}s`;
+        }
+        observer.observe(htmlEl);
+      });
+    };
 
-    // Mark elements in initial viewport as visible immediately to avoid flash
-    const targets = document.querySelectorAll(
-      '.panel, .stat-card, .table-wrap, .bars-group'
-    );
-    targets.forEach((el) => {
-      const rect = el.getBoundingClientRect();
-      if (rect.top < window.innerHeight) {
-        el.classList.add('reveal-in');
-      } else {
-        el.classList.add('reveal-target', 'from-bottom');
-        observer.observe(el);
-      }
+    // Observe existing targets immediately and after short delay
+    observeTargets();
+    const timer = setTimeout(observeTargets, 20);
+
+    // Watch for async rendered elements
+    const mutationObserver = new MutationObserver(() => {
+      observeTargets();
     });
+    mutationObserver.observe(document.body, { childList: true, subtree: true });
 
     return () => {
-      window.removeEventListener('scroll', updateDirectionClasses);
+      clearTimeout(timer);
+      window.removeEventListener('scroll', onScroll);
       observer.disconnect();
+      mutationObserver.disconnect();
     };
   }, [activeId]);
 }
@@ -199,19 +200,17 @@ function Dashboard({ session, onLogout }: { session: Session; onLogout: () => vo
                 class="toggle-btn"
                 onClick={() => setCollapsed(true)}
                 title="Collapse Sidebar"
-                aria-label="Collapse Sidebar"
               >
-                <ChevronLeftIcon />
+                <PanelLeftIcon />
               </button>
             </>
           ) : (
             <button
               class="sidebar-brand-icon collapsed-toggle-btn"
               onClick={() => setCollapsed(false)}
-              title="Expand Sidebar"
-              aria-label="Expand Sidebar"
+              title="Expand Sidebar (Vanguard Logo)"
             >
-              <ChevronRightIcon />
+              <LayersIcon />
             </button>
           )}
         </div>
