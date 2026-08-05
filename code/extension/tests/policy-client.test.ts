@@ -116,6 +116,51 @@ describe('refreshPolicy', () => {
     expect(url).toContain('org_id=o1');
     expect(url).toContain('department_id=dept1');
   });
+
+  it('sends pseudo_id on the policy fetch', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 304 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await chrome.storage.local.set({
+      vg_enrolment: { org_id: 'o1', org_name: 'A', pseudo_id: 'p1', department: 'Eng' },
+    });
+
+    await refreshPolicy();
+
+    const url = String(fetchMock.mock.calls[0]![0]);
+    expect(url).toContain('pseudo_id=p1');
+  });
+
+  it('drops to Personal and returns null when the server reports the enrolment revoked', async () => {
+    vi.stubGlobal('fetch', async () => new Response(
+      JSON.stringify({ detail: 'enrolment revoked' }), { status: 403 },
+    ));
+    await chrome.storage.local.set({
+      vg_mode: 'enterprise',
+      vg_enrolment: { org_id: 'o1', org_name: 'A', pseudo_id: 'p1', department: 'Eng' },
+      vg_policy: policy,
+    });
+
+    const result = await refreshPolicy();
+
+    expect(result).toBeNull();
+    expect((await chrome.storage.local.get('vg_enrolment')).vg_enrolment).toBeUndefined();
+    expect((await chrome.storage.local.get('vg_mode')).vg_mode).toBe('personal');
+  });
+
+  it('does not un-enrol on a bare 403 whose body does not match the revocation contract', async () => {
+    vi.stubGlobal('fetch', async () => new Response(
+      JSON.stringify({ detail: 'forbidden' }), { status: 403 },
+    ));
+    await chrome.storage.local.set({
+      vg_enrolment: { org_id: 'o1', org_name: 'A', pseudo_id: 'p1', department: 'Eng' },
+      vg_policy: policy,
+    });
+
+    const result = await refreshPolicy();
+
+    expect(result).toEqual(policy); // falls back to cache, exactly like any other non-OK response
+    expect((await chrome.storage.local.get('vg_enrolment')).vg_enrolment).toBeDefined();
+  });
 });
 
 describe('sendAccessRequest', () => {

@@ -10,6 +10,7 @@
  */
 import { POLICY_CONFIG, getPolicyBase } from './config';
 import { getCachedPolicy, getEnrolment, getEtag, saveEnrolment, savePolicy } from './store';
+import { handleRevoked } from './revoked';
 import type { Enrolment, Policy } from './types';
 
 async function timedFetch(url: string, init?: RequestInit): Promise<Response> {
@@ -61,10 +62,21 @@ export async function refreshPolicy(): Promise<Policy | null> {
       ? `&department_id=${encodeURIComponent(enrolment.department_id)}`
       : '';
     const response = await timedFetch(
-      `${base}/v1/policy?org_id=${encodeURIComponent(enrolment.org_id)}${deptParam}`,
+      `${base}/v1/policy?org_id=${encodeURIComponent(enrolment.org_id)}` +
+        `&pseudo_id=${encodeURIComponent(enrolment.pseudo_id)}${deptParam}`,
       { headers: etag ? { 'If-None-Match': etag } : {} },
     );
     if (response.status === 304) return await getCachedPolicy();
+    if (response.status === 403) {
+      // Only the server's exact revocation contract un-enrols anyone. A bare
+      // 403 from a proxy or gateway falls through to the generic !ok branch
+      // below and is treated like any other dead-service response.
+      const body = await response.json().catch(() => null);
+      if ((body as { detail?: string } | null)?.detail === 'enrolment revoked') {
+        await handleRevoked();
+        return null;
+      }
+    }
     if (!response.ok) return await getCachedPolicy();
 
     const policy = (await response.json()) as Policy;
