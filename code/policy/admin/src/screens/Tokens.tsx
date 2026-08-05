@@ -90,7 +90,7 @@ export function Tokens() {
         {error && <p class="error">{error}</p>}
 
         {minted && (
-          <div class="mint-result">
+          <div class="mint-result" role="status" aria-live="polite">
             <strong>Token Minted — Copy immediately (it will not be shown again):</strong>
             <code>{minted}</code>
           </div>
