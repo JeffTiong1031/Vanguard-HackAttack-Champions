@@ -1,9 +1,10 @@
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 
 from app.deps import get_conn
-from app.enrolment import employee_for_token
+from app.enrolment import employee_for_token, token_is_expired
 from app.models import EnrollRequest, EnrollResponse
 from app.routes.policy_read import read_policy
 from app.security import hash_token, now_iso
@@ -20,7 +21,7 @@ async def enroll(body: EnrollRequest) -> EnrollResponse:
     """
     conn = get_conn()
     row = conn.execute(
-        "SELECT id, org_id, department, department_id, name FROM enroll_tokens"
+        "SELECT id, org_id, department, department_id, name, created_at FROM enroll_tokens"
         " WHERE token_hash = %s AND revoked = 0",
         (hash_token(body.token),),
     ).fetchone()
@@ -29,6 +30,8 @@ async def enroll(body: EnrollRequest) -> EnrollResponse:
         raise HTTPException(status_code=401, detail="enrolment token not recognised")
 
     existing = employee_for_token(conn, row["id"])
+    if token_is_expired(row["created_at"], datetime.now(timezone.utc), used=existing is not None):
+        raise HTTPException(status_code=401, detail="enrolment token expired")
     if existing:
         # A reinstall. Hand back the same identity so history does not split.
         pseudo_id = existing["pseudo_id"]
