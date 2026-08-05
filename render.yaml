@@ -18,3 +18,16 @@ services:
     envVars:
       - key: VANGUARD_DEMO_TOKEN
         sync: false   # set in the Render dashboard; never committed
+
+  # AI governance dashboard + policy API (code/policy/).
+  # Demo-grade: Supabase Postgres, admin console at /, API at /v1/*.
+  - type: web
+    name: vanguard-policy
+    runtime: docker
+    rootDir: code/policy
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        sync: false   # Supabase Transaction pooler URI (port 6543); never committed
