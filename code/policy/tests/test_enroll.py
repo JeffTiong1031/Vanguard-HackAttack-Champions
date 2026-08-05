@@ -33,10 +33,18 @@ def test_enrol_returns_the_department_from_the_token_not_the_client():
                for t in body["policy"]["tools"])
 
 
-def test_enrol_mints_a_distinct_pseudo_id_each_time():
-    token = _mint("Engineering")
-    a = client.post("/v1/enroll", json={"token": token}).json()["pseudo_id"]
-    b = client.post("/v1/enroll", json={"token": token}).json()["pseudo_id"]
+def test_enrol_mints_a_distinct_pseudo_id_per_person():
+    """Two different people (two different tokens) get different identities.
+
+    Was: minted a fresh pseudo_id on every call to the SAME token. That is
+    the exact bug task 1.2 fixes -- a reinstall must reuse the identity, not
+    split it -- so same-token idempotence is now covered by
+    test_enrolment_identity.py::test_same_token_twice_returns_one_identity,
+    and this test moved to what it was actually meant to pin: distinctness
+    across people.
+    """
+    a = client.post("/v1/enroll", json={"token": _mint("Engineering")}).json()["pseudo_id"]
+    b = client.post("/v1/enroll", json={"token": _mint("Engineering")}).json()["pseudo_id"]
     assert a != b
 
 
@@ -91,10 +99,14 @@ def test_pseudo_id_is_a_fresh_uuid4_not_derived_from_the_token():
     still parses as a UUIDv4, so it would pass. Closing that would need a
     statistical or source-level check, which is not worth it here: the shipped
     code is uuid.uuid4(), whose randomness comes from the platform CSPRNG.
+
+    Uses two different tokens, not one token twice: since task 1.2, the same
+    token returns the SAME pseudo_id on a second call (find-or-create), so
+    "distinct" now has to be measured across two different people, not two
+    calls of one enrolment.
     """
-    token = _mint("Engineering")
-    a = client.post("/v1/enroll", json={"token": token}).json()["pseudo_id"]
-    b = client.post("/v1/enroll", json={"token": token}).json()["pseudo_id"]
+    a = client.post("/v1/enroll", json={"token": _mint("Engineering")}).json()["pseudo_id"]
+    b = client.post("/v1/enroll", json={"token": _mint("Engineering")}).json()["pseudo_id"]
     for pid in (a, b):
         parsed = uuid.UUID(hex=pid)
         assert parsed.version == 4

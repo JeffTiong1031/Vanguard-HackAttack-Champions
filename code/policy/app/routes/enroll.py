@@ -3,6 +3,7 @@ import uuid
 from fastapi import APIRouter, HTTPException
 
 from app.deps import get_conn
+from app.enrolment import employee_for_token
 from app.models import EnrollRequest, EnrollResponse
 from app.routes.policy_read import read_policy
 from app.security import hash_token, now_iso
@@ -19,7 +20,7 @@ async def enroll(body: EnrollRequest) -> EnrollResponse:
     """
     conn = get_conn()
     row = conn.execute(
-        "SELECT org_id, department, department_id, name FROM enroll_tokens"
+        "SELECT id, org_id, department, department_id, name FROM enroll_tokens"
         " WHERE token_hash = %s AND revoked = 0",
         (hash_token(body.token),),
     ).fetchone()
@@ -27,14 +28,20 @@ async def enroll(body: EnrollRequest) -> EnrollResponse:
         # Log the failure, never the token.
         raise HTTPException(status_code=401, detail="enrolment token not recognised")
 
-    employee_id = uuid.uuid4().hex
-    pseudo_id = uuid.uuid4().hex
-    conn.execute(
-        "INSERT INTO employees (id, org_id, pseudo_id, department, department_id, name, created_at)"
-        " VALUES (%s, %s, %s, %s, %s, %s, %s)",
-        (employee_id, row["org_id"], pseudo_id, row["department"], row["department_id"], row["name"], now_iso()),
-    )
-    conn.commit()
+    existing = employee_for_token(conn, row["id"])
+    if existing:
+        # A reinstall. Hand back the same identity so history does not split.
+        pseudo_id = existing["pseudo_id"]
+    else:
+        employee_id, pseudo_id = uuid.uuid4().hex, uuid.uuid4().hex
+        conn.execute(
+            "INSERT INTO employees"
+            " (id, org_id, pseudo_id, department, department_id, name, created_at, enroll_token_id)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            (employee_id, row["org_id"], pseudo_id, row["department"],
+             row["department_id"], row["name"], now_iso(), row["id"]),
+        )
+        conn.commit()
 
     policy = read_policy(conn, row["org_id"], row["department_id"])
     return EnrollResponse(
