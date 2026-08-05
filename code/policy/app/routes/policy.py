@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Header, HTTPException, Response
 
 from app.deps import get_conn
+from app.enrolment import enrolment_is_revoked
 from app.models import PolicyBody
 from app.routes.policy_read import read_policy
 
@@ -17,14 +18,22 @@ async def get_policy(
     response: Response,
     if_none_match: str | None = Header(default=None),
     department_id: str | None = None,
+    pseudo_id: str | None = None,
 ):
     """Return the org's policy, or 304 if the caller already has this version.
 
     The ETag is the org's policy_version (plus the department_id, since the
     effective policy differs by department), so any write that calls
     bump_policy_version() invalidates every client's cache on its next poll.
+
+    `pseudo_id` is optional so an older extension build that never sends it
+    keeps working (backwards compatible) — it just skips the revocation
+    check.
     """
     conn = get_conn()
+    if pseudo_id and enrolment_is_revoked(conn, pseudo_id):
+        raise HTTPException(status_code=403, detail="enrolment revoked")
+
     row = conn.execute(
         "SELECT policy_version FROM orgs WHERE id = %s", (org_id,)
     ).fetchone()

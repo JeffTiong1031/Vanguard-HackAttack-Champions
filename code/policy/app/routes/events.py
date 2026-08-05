@@ -11,6 +11,7 @@ import uuid
 from fastapi import APIRouter, HTTPException
 
 from app.deps import get_conn
+from app.enrolment import enrolment_is_revoked
 from app.models import EventBatch
 
 log = logging.getLogger("vanguard.policy")
@@ -25,6 +26,8 @@ async def ingest(batch: EventBatch) -> dict[str, int]:
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=401, detail="unknown enrolment")
+    if enrolment_is_revoked(conn, batch.pseudo_id):
+        raise HTTPException(status_code=403, detail="enrolment revoked")
 
     conn.executemany(
         "INSERT INTO usage_events"

@@ -36,3 +36,19 @@ def token_is_expired(created_at: str, now: datetime, used: bool) -> bool:
     if used:
         return False
     return datetime.fromisoformat(created_at) + UNUSED_TOKEN_TTL < now
+
+
+def enrolment_is_revoked(conn, pseudo_id: str) -> bool:
+    """True when this employee's originating token has been revoked.
+
+    Returns False for employees enrolled before enroll_token_id existed —
+    they have no lineage to revoke, and failing them closed would cut off
+    people no admin has acted on.
+    """
+    row = conn.execute(
+        "SELECT t.revoked AS revoked FROM employees e"
+        " JOIN enroll_tokens t ON t.id = e.enroll_token_id"
+        " WHERE e.pseudo_id = %s",
+        (pseudo_id,),
+    ).fetchone()
+    return bool(row and row["revoked"])
