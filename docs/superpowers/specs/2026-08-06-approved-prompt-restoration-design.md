@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-06
 
-**Status:** Design agreed in conversation; awaiting written-spec review
+**Status:** Design reviewed and approved; final edge cases incorporated
 
 **Scope:** ChatGPT and Claude, unpacked pitch build first
 
@@ -15,7 +15,8 @@ employee's original work:
 2. The employee requests human review and gives a reason.
 3. A department admin approves the exact prompt fingerprint.
 4. Vanguard tells the employee within a few seconds.
-5. Vanguard makes the exact approved prompt ready in the original conversation.
+5. Vanguard makes the exact approved prompt ready in the original conversation,
+   or in a completely new conversation when newer work must be protected.
 6. The employee presses Send.
 7. Vanguard consumes the approval and deletes its temporary copy of the prompt.
 
@@ -38,7 +39,8 @@ exact prompt only when the employee ticks **Include the exact text**.
 | Open original tab | Verify the existing text; do not paste a duplicate |
 | Closed original tab | Persistent system notification opens the saved conversation |
 | Employee using another conversation | Never touch it; open the saved conversation separately |
-| Non-empty, changed composer | Never overwrite; show **Approved prompt ready — Restore** |
+| Original conversation advanced while pending | Never add the old prompt to the newer context; Restore opens a completely new conversation |
+| Non-empty, changed composer | Never overwrite; Restore opens a completely new conversation |
 | Admin visibility | Existing opt-in disclosure behavior remains unchanged |
 | Pitch polling | One status request every 2.5 seconds while at least one draft is pending |
 | Production polling | At least 30 seconds when no supported tab is open, or replace with push later |
@@ -65,15 +67,22 @@ the review. On approval, Vanguard reads the composer and hashes it.
 
 - If the hash matches, Vanguard does not rewrite the text. It shows a fixed
   green toast on the right: **Approved — ready to send once**.
-- If the composer is empty, Vanguard writes the saved text through the site's
-  editing path, reads it back, verifies the hash, then shows the toast.
-- If the composer contains different text, Vanguard does not touch it. The
-  toast instead says **Approved prompt ready** and offers **Restore**.
+- If the composer is empty and no other prompt has been sent in that
+  conversation since the review request, Vanguard writes the saved text through
+  the site's editing path, reads it back, verifies the hash, then shows the
+  toast.
+- If the composer contains different text, or another prompt has been sent in
+  that conversation since the review request, Vanguard does not touch the
+  conversation. The toast says **Approved prompt ready** and offers **Restore in
+  new chat**.
 
 The ready toast follows the existing Vanguard visual language: green status
 head, check icon, compact explanation, optional admin note, and no automatic
 dismiss timer. It disappears after the approved send is consumed. Editing the
-composer into a different hash changes the toast to the Restore state.
+composer into a different hash changes the toast to the Restore-in-new-chat
+state. Clicking that action opens the provider's blank new-conversation route
+in a separate tab, restores and verifies the approved text there, then arms the
+one-time send. It never replaces the employee's newer text.
 
 ### 4.2 Original tab was closed
 
@@ -91,9 +100,11 @@ activates or dismisses the notification. Vanguard clears it on activation or
 successful send, but cannot and must not prevent an OS/user dismissal:
 <https://developer.chrome.com/docs/extensions/reference/api/notifications>.
 
-Clicking the notification opens the saved conversation URL in a new tab. After
-the supported composer appears, Vanguard applies the same hash/empty/changed
-rules as section 4.1.
+Clicking the notification opens the saved conversation URL in a new tab unless
+the original conversation was marked as advanced. An advanced conversation
+opens the provider's blank new-conversation route instead. After the supported
+composer appears, Vanguard applies the same hash/empty/changed rules as section
+4.1.
 
 ### 4.3 Employee is using another conversation
 
@@ -107,19 +118,49 @@ If the appeal originated on a new-chat URL, reopening that saved URL naturally
 starts a new conversation. Otherwise Vanguard preserves the original
 conversation context.
 
-### 4.4 Missed-notification fallback
+### 4.4 Original conversation advances while review is pending
+
+After a review request, the content script watches later send attempts in the
+same conversation. The first different prompt that is allowed to proceed marks
+the saved draft `conversationAdvanced = true`. A conservative mark is safe even
+if the provider later fails to deliver that prompt: it changes only the restore
+target and never grants an allowance.
+
+When approval arrives, Vanguard leaves that conversation byte-for-byte
+unchanged. **Restore in new chat** opens a completely new ChatGPT or Claude
+conversation, waits for its empty composer, writes and verifies the approved
+prompt, and shows **Approved — ready to send once**. The employee still presses
+Send.
+
+Typing newer text without sending it receives the same protection. Vanguard
+does not need to distinguish between an occupied composer and delivered newer
+work to avoid overwriting either one.
+
+### 4.5 Missed-notification fallback
 
 Dismissing or missing the system notification does not discard the approval.
 When a ChatGPT or Claude content script next starts, it asks the background for
 approved-ready drafts for that host. It then shows **Approved prompt ready**.
-The employee's click opens the saved conversation; it never injects the text
-into whichever conversation happens to be active.
+The employee's click opens the saved conversation, or a completely new
+conversation when the saved record is marked advanced. It never injects the
+text into whichever conversation happens to be active.
 
-### 4.5 Rejection
+### 4.6 Rejection
 
-Rejection creates a normal decision notification, removes the raw local prompt,
-and removes the pending draft. The existing My Reviews UI remains the durable
-place to read the admin note and remediation guidance.
+Rejection never changes the provider composer. Vanguard immediately removes
+the locally saved raw prompt, pending draft, and any accidental local allowance.
+If the relevant supported tab is open, it shows a fixed red **Review rejected**
+toast with the admin note and **View review**. If no eligible tab is open, it
+shows a `requireInteraction` system notification without prompt text. Clicking
+either opens the existing My Reviews UI, which remains the durable place to
+read the admin note and remediation guidance.
+
+The in-page rejection toast has no dismissal timer and remains until the
+employee acknowledges it. The user or operating system may still dismiss a
+system notification, but that never removes the server-side review history. If
+the rejected text is still in the provider composer and the employee tries to
+send it again, the normal ethics gate blocks it again. A network error, timeout,
+or malformed response remains pending and is never displayed as rejection.
 
 ## 5. Architecture
 
@@ -161,6 +202,7 @@ type PendingPromptDraft = {
   host: 'chatgpt.com' | 'claude.ai';
   conversationUrl: string;
   originalTabId: number;
+  conversationAdvanced: boolean;
   createdAt: number;
   expiresAt: number;
   state: 'pending' | 'approved_ready';
@@ -216,6 +258,11 @@ The approval-aware poller owns prompt-review decision notifications. The
 existing generic notification loop must skip the same appeal-decision records
 so the employee does not receive duplicate popups.
 
+A content-script message marks a draft as `conversationAdvanced` when a later,
+different prompt is allowed to proceed in its original conversation. The
+transition is monotonic: it can change from false to true but never back to
+false.
+
 ### 5.4 Server-side one-time claim
 
 The current permanent approved-scope list can re-grant an approval after a tab
@@ -262,13 +309,20 @@ and current composer. It returns one explicit outcome:
 
 - `already_present` — current hash matches; arm pass and show ready toast;
 - `restored` — empty composer accepted text and read-back hash matches;
-- `occupied` — different non-empty text; show Restore state, no write;
+- `new_conversation_required` — composer is occupied or the saved conversation
+  advanced; show Restore-in-new-chat state, no write;
 - `unavailable` — no supported composer before the bounded readiness timeout;
 - `write_failed` — site rejected/reverted the insertion or hash mismatched.
 
 Only `already_present` and `restored` arm the send pass. Restoration uses the
 browser editing path and read-back verification established by U31; calling an
 adapter method without verifying the final hash is not success.
+
+Each supported adapter exposes its blank new-conversation URL. The
+`new_conversation_required` action opens that URL in a separate tab and will
+write only after the adapter confirms that the destination composer is empty.
+If it is not empty, the coordinator remains unarmed and offers Copy; it never
+replaces text.
 
 `write_failed` exposes a user-clicked **Copy approved prompt** action. Copying
 does not consume the pass. After paste, the normal exact-hash gate decides the
@@ -306,9 +360,10 @@ carry the one-time ethics decision without silently approving unreviewed PII.
 | Notification permission denied/dismissed | Preserve approved-ready draft; recover when supported site opens |
 | Saved URL requires login | Wait for login/navigation and a supported composer; never inject into login UI |
 | Saved URL no longer resolves | Keep approved-ready record and offer Copy from a supported-page user gesture |
-| Composer has different text | Never overwrite; show Restore state |
+| Composer has different text | Never overwrite; Restore opens a completely new conversation |
+| Original conversation receives another allowed prompt | Mark it advanced; approval restores only in a completely new conversation |
 | Write-back reverts or hash differs | Do not arm; offer user-clicked clipboard fallback |
-| Review is rejected | Notify, delete raw prompt immediately, retain server-side review history |
+| Review is rejected | Delete local raw prompt/pass immediately; leave provider composer unchanged; show red acknowledgement message and retain server-side review history |
 | Draft reaches 24 hours | Delete raw prompt and pass; later approval cannot restore it |
 | Chrome exits | `storage.session` clears; no cross-restart recovery |
 | Employee logs out/re-enrols/token is revoked | Clear every local draft and pass for that enrolment |
@@ -333,13 +388,18 @@ policy service into a global extension failure.
   routing.
 - Exact text already present is not written twice.
 - Empty composer is written, read back, hashed, and armed only on equality.
-- Different text is never overwritten.
+- A later allowed send marks only the matching draft as conversation-advanced.
+- Different text or an advanced conversation is never overwritten; Restore
+  opens the adapter's completely new conversation route.
 - Failed write offers Copy and does not consume/arm prematurely.
 - Notification fallback on a newly opened ChatGPT/Claude tab finds the right
   approved-ready draft.
 - First matching send consumes the pass; a second send blocks.
 - Click plus submit is one physical approved send.
 - Ethics approval does not skip the PII path.
+- Rejection deletes the local raw draft and pass, leaves provider text
+  unchanged, shows no prompt text in notifications, and links to My Reviews.
+- Poll failures, malformed responses, and timeouts never appear as rejection.
 - Chrome/session cleanup, expiry, logout, and enrolment change clear drafts.
 
 ### 7.2 Policy-service tests
@@ -367,13 +427,19 @@ Run against real unpacked builds on both ChatGPT and Claude:
    approve -> current composer remains byte-identical -> saved conversation
    opens separately.
 4. **Changed composer:** edit after requesting -> approve -> no overwrite ->
-   Restore action behaves deliberately.
+   Restore opens a completely new conversation -> exact prompt restores there.
 5. **Missed notification:** dismiss it -> open supported site -> in-page
    Approved prompt ready recovery appears.
 6. **Write-back failure:** force adapter rejection -> Copy fallback appears ->
    pasted matching prompt sends once.
 7. **Restart boundary:** close Chrome before approval -> restart -> no raw draft
    and no restoration claim.
+8. **Original conversation advanced:** request review -> send a different
+   allowed prompt in the same conversation -> approve -> Restore opens a
+   completely new conversation; the advanced conversation stays byte-identical.
+9. **Rejected review:** reject with an admin note -> red/system notification ->
+   local raw prompt is gone -> provider composer is unchanged -> View review
+   opens My Reviews -> retrying rejected text blocks again.
 
 Raw observations must include the composer before/after text hash, selected tab
 URL, restoration outcome, and notification-to-ready latency. They must not log
@@ -389,7 +455,7 @@ The feature is accepted only when all of the following hold:
 | 2 | Open-tab approval never duplicates an already-present prompt |
 | 3 | Closed-tab notification opens the saved conversation and restores the exact hash on ChatGPT and Claude |
 | 4 | A different conversation's composer remains byte-identical |
-| 5 | A non-empty changed composer is never overwritten |
+| 5 | A non-empty changed composer is never overwritten; Restore opens a completely new conversation |
 | 6 | Restoration is called successful only after read-back hash equality |
 | 7 | Employee must press Send; no code path auto-submits |
 | 8 | The server claim and local gate permit exactly one matching send |
@@ -399,6 +465,10 @@ The feature is accepted only when all of the following hold:
 | 12 | Ethics approval does not bypass PII or other policy checks |
 | 13 | No pending drafts means no fast status polling |
 | 14 | System-notification dismissal still leaves an in-page recovery path |
+| 15 | Sending another prompt in the original conversation marks it advanced; approval restores only in a completely new conversation |
+| 16 | Rejection deletes the local raw prompt and pass without changing provider composer text |
+| 17 | In-page rejection UI contains the admin note and View review, contains no prompt text, and persists until acknowledgement |
+| 18 | Network errors, timeouts, and malformed decisions never appear as rejection |
 
 ## 9. Consequences and trade-offs
 
@@ -414,6 +484,9 @@ The feature is accepted only when all of the following hold:
 - **Conversation URL:** retaining it locally is necessary for correct targeting;
   it must be treated as private local state and never telemetry.
 - **No overwrite:** safety wins over magic whenever the employee has newer text.
+- **Advanced conversation:** preserving newer context costs one extra tab, but
+  the approved prompt begins in a clean conversation and cannot disrupt later
+  work.
 - **Server change:** one-time truth moves from a content-script `Set` to an
   idempotent server claim plus a session-local send token.
 
