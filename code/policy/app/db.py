@@ -27,8 +27,13 @@ class _Connection:
     """
 
     def __init__(self, dsn: str) -> None:
-        self._conn = psycopg2.connect(dsn)
+        # connect_timeout: fail fast on bad DNS/credentials (Render health check).
+        # statement_timeout: migrations must not block port bind indefinitely.
+        self._conn = psycopg2.connect(dsn, connect_timeout=15)
         self._conn.autocommit = False
+        with self._conn.cursor() as cur:
+            cur.execute("SET statement_timeout = '30s'")
+        self._conn.commit()
 
     def execute(self, sql: str, params=()) -> psycopg2.extras.RealDictCursor:
         if self._conn.get_transaction_status() == psycopg2.extensions.TRANSACTION_STATUS_INERROR:
@@ -70,6 +75,9 @@ class _Connection:
             self._conn.rollback()
         else:
             self._conn.commit()
+
+    def rollback(self) -> None:
+        self._conn.rollback()
 
     def close(self) -> None:
         self._conn.close()
@@ -252,25 +260,15 @@ _MIGRATIONS = [
         status       TEXT NOT NULL DEFAULT 'unread',
         created_at   TEXT NOT NULL
     );""",
-    """DO $$
-    DECLARE
-        r RECORD;
-    BEGIN
-        FOR r IN (
-            SELECT c.conname, t.relname 
-            FROM pg_constraint c 
-            JOIN pg_class t ON c.conrelid = t.oid 
-            WHERE c.contype = 'c' 
-              AND t.relname IN ('org_llm_policy', 'dept_llm_policy', 'access_requests', 'decision_appeals')
-        ) LOOP
-            EXECUTE 'ALTER TABLE ' || quote_ident(r.relname) || ' DROP CONSTRAINT IF EXISTS ' || quote_ident(r.conname);
-        END LOOP;
-
-        EXECUTE 'ALTER TABLE org_llm_policy ADD CONSTRAINT org_llm_policy_status_check CHECK (status IN (''approved'', ''blocked'', ''temporary'', ''trial'', ''conditional''))';
-        EXECUTE 'ALTER TABLE dept_llm_policy ADD CONSTRAINT dept_llm_policy_status_check CHECK (status IN (''approved'', ''blocked'', ''temporary'', ''trial'', ''conditional''))';
-        EXECUTE 'ALTER TABLE access_requests ADD CONSTRAINT access_requests_status_check CHECK (status IN (''pending'', ''approved'', ''blocked'', ''temporary'', ''trial'', ''conditional''))';
-        EXECUTE 'ALTER TABLE decision_appeals ADD CONSTRAINT decision_appeals_status_check CHECK (status IN (''pending'', ''approved'', ''blocked'', ''temporary'', ''trial'', ''conditional''))';
-    END $$;""",
+    # Pooler-safe status checks (DO $$ blocks hang on Supabase transaction mode).
+    "ALTER TABLE org_llm_policy DROP CONSTRAINT IF EXISTS org_llm_policy_status_check;",
+    "ALTER TABLE org_llm_policy ADD CONSTRAINT org_llm_policy_status_check CHECK (status IN ('approved', 'blocked', 'temporary', 'trial', 'conditional'));",
+    "ALTER TABLE dept_llm_policy DROP CONSTRAINT IF EXISTS dept_llm_policy_status_check;",
+    "ALTER TABLE dept_llm_policy ADD CONSTRAINT dept_llm_policy_status_check CHECK (status IN ('approved', 'blocked', 'temporary', 'trial', 'conditional'));",
+    "ALTER TABLE access_requests DROP CONSTRAINT IF EXISTS access_requests_status_check;",
+    "ALTER TABLE access_requests ADD CONSTRAINT access_requests_status_check CHECK (status IN ('pending', 'approved', 'blocked', 'temporary', 'trial', 'conditional'));",
+    "ALTER TABLE decision_appeals DROP CONSTRAINT IF EXISTS decision_appeals_status_check;",
+    "ALTER TABLE decision_appeals ADD CONSTRAINT decision_appeals_status_check CHECK (status IN ('pending', 'approved', 'blocked', 'temporary', 'trial', 'conditional'));",
 ]
 
 
@@ -285,8 +283,8 @@ def migrate_schema(conn: "_Connection") -> None:
             conn.execute(stmt)
             conn.commit()
         except Exception:
-            # Drop constraint / alter table failure can happen if already matching schema
-            pass
+            # Drop constraint / alter table failure can happen if already matching schema.
+            conn.rollback()
 
 
 def bump_policy_version(conn: "_Connection", org_id: str) -> int:

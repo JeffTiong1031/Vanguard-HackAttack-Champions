@@ -13,5 +13,5 @@ COPY app ./app
 COPY --from=admin-build /src/app/static ./app/static
 RUN pip install --no-cache-dir .
 
-EXPOSE 8000
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log"]
+# Render sets PORT (commonly 10000). Bind 0.0.0.0 so the health check can reach us.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log"]
