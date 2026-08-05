@@ -271,6 +271,22 @@ _COLUMN_ADDS: list[tuple[str, str, str]] = [
      "ALTER TABLE employees ADD COLUMN IF NOT EXISTS enroll_token_id TEXT"),
 ]
 
+# (index_name, table, CREATE UNIQUE INDEX IF NOT EXISTS …). Indexes are not
+# columns, so _existing_columns' information_schema.columns lookup does not
+# see them -- tracked and checked separately via pg_indexes.
+#
+# enroll_token_id is nullable (948 legacy rows predate the column and stay
+# NULL forever) and Postgres unique indexes treat NULLs as distinct from one
+# another, so a plain (non-partial) unique index is safe: any number of NULL
+# rows coexist, and only a real duplicate token id is rejected. Verified
+# against the live table before adding this: zero duplicate non-NULL
+# enroll_token_id values existed (2026-08-06).
+_INDEX_ADDS: list[tuple[str, str, str]] = [
+    ("ux_employees_enroll_token_id", "employees",
+     "CREATE UNIQUE INDEX IF NOT EXISTS ux_employees_enroll_token_id"
+     " ON employees (enroll_token_id)"),
+]
+
 _NOTIFICATIONS_DDL = """
 CREATE TABLE IF NOT EXISTS notifications (
     id           TEXT PRIMARY KEY,
@@ -342,6 +358,16 @@ def _table_exists(conn: "_Connection", name: str) -> bool:
     return row is not None
 
 
+def _existing_indexes(conn: "_Connection") -> set[str]:
+    """Which named indexes in _INDEX_ADDS already exist in public."""
+    names = [n for n, _, _ in _INDEX_ADDS]
+    rows = conn.execute(
+        "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY(%s)",
+        (names,),
+    ).fetchall()
+    return {r["indexname"] for r in rows}
+
+
 def _current_status_constraints(conn: "_Connection") -> set[str]:
     """Names of status CHECKs that already allow temporary + conditional."""
     names = [n for n, _, _ in _STATUS_CHECK_MIGRATIONS]
@@ -374,6 +400,22 @@ def migrate_schema(conn: "_Connection") -> None:
 
     for table, column, stmt in _COLUMN_ADDS:
         if (table, column) in existing:
+            continue
+        try:
+            conn.execute(stmt)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+    try:
+        existing_indexes = _existing_indexes(conn)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        existing_indexes = set()
+
+    for name, table, stmt in _INDEX_ADDS:
+        if name in existing_indexes:
             continue
         try:
             conn.execute(stmt)

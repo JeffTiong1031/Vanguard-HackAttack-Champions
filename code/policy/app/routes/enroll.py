@@ -34,14 +34,22 @@ async def enroll(body: EnrollRequest) -> EnrollResponse:
         pseudo_id = existing["pseudo_id"]
     else:
         employee_id, pseudo_id = uuid.uuid4().hex, uuid.uuid4().hex
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO employees"
             " (id, org_id, pseudo_id, department, department_id, name, created_at, enroll_token_id)"
-            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
+            " ON CONFLICT (enroll_token_id) DO NOTHING",
             (employee_id, row["org_id"], pseudo_id, row["department"],
              row["department_id"], row["name"], now_iso(), row["id"]),
         )
         conn.commit()
+        if cur.rowcount == 0:
+            # Lost a concurrent race for this token: another request's INSERT
+            # won under the unique index. Hand back the winner's identity so
+            # both callers agree on one pseudo_id instead of erroring or
+            # silently minting a second person.
+            winner = employee_for_token(conn, row["id"])
+            pseudo_id = winner["pseudo_id"]
 
     policy = read_policy(conn, row["org_id"], row["department_id"])
     return EnrollResponse(
