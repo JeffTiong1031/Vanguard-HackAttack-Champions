@@ -47,25 +47,25 @@ describe('submitAppeal', () => {
 });
 
 describe('grantPassIfAllowed', () => {
-  it('grants and burns the pass when the hash is an active allowance', async () => {
+  it('grants a pass when the prompt hash is in the approved scopes list', async () => {
     const urls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       urls.push(String(url));
-      if (String(url).includes('/allowances/consume')) return new Response('{"consumed":1}', { status: 200 });
-      if (String(url).includes('/allowances')) return new Response('["hashA","hashB"]', { status: 200 });
-      return new Response('{}', { status: 200 });
+      return new Response('["hashA","hashB"]', { status: 200 });
     }));
     expect(await grantPassIfAllowed('hashA')).toBe(true);
-    expect(urls.some((u) => u.includes('/allowances/consume'))).toBe(true);   // burned it
+    expect(urls.some((u) => u.includes('/approved-scopes'))).toBe(true);
+    // No consume call — approval is persistent, not one-time-burn
+    expect(urls.some((u) => u.includes('/consume'))).toBe(false);
   });
 
-  it('does not grant a pass when the hash is not an allowance', async () => {
+  it('does not grant a pass when the hash is not in the approved scopes list', async () => {
     const urls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       urls.push(String(url));
       return new Response('["someOtherHash"]', { status: 200 });
     }));
     expect(await grantPassIfAllowed('hashA')).toBe(false);
-    expect(urls.some((u) => u.includes('/consume'))).toBe(false);             // never burned
+    expect(urls.some((u) => u.includes('/consume'))).toBe(false);
   });
 });

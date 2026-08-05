@@ -46,3 +46,21 @@ def test_limit_and_department_scope():
     only_a = analytics_alerts(get_conn(), org_id, 50, da)
     assert len(only_a) == 1 and only_a[0]["department"] == "Alpha"
     assert len(analytics_alerts(get_conn(), org_id, 1, None)) == 1
+
+
+def test_prompt_send_uses_its_recorded_risk_level():
+    org_id, _ = seed_company(get_conn(), "PromptAlerts " + uuid.uuid4().hex[:6])
+    dept_id, _ = create_department(get_conn(), org_id, "Engineering")
+    e = _emp(org_id, dept_id, "Engineering")
+    get_conn().execute(
+        "INSERT INTO usage_events"
+        " (id, org_id, employee_id, host, type, category, finding_hash, risk_level, ts)"
+        " VALUES (%s, %s, %s, 'chatgpt.com', 'prompt_sent', 'NRIC', NULL, 'medium', %s)",
+        (uuid.uuid4().hex, org_id, e, "2026-08-05T10:00:00+00:00"),
+    )
+    get_conn().commit()
+
+    row = analytics_alerts(get_conn(), org_id, 50, None)[0]
+    assert row["type"] == "prompt_sent"
+    assert row["action"] == "Sent"
+    assert row["severity"] == "medium"

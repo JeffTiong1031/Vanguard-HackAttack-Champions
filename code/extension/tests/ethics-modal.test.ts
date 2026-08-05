@@ -37,4 +37,24 @@ describe('ethics modal', () => {
     root().querySelector<HTMLButtonElement>('[data-act="send-review"]')!.click();
     expect(onRequestReview).toHaveBeenCalledWith('r', 'the prompt');
   });
+
+  it('renders My Reviews right panel with recent reviews, status, and reason', () => {
+    showEthicsModal({
+      label: 'Covert monitoring',
+      category: 'covert_surveillance',
+      orgName: 'Acme',
+      reviews: [
+        { category: 'covert_surveillance', status: 'pending', reason: 'defensive audit', admin_note: null },
+        { category: 'exploit_code', status: 'approved', reason: 'security lab test', admin_note: 'Approved for security team' },
+      ],
+      onEdit: () => {},
+      onRequestReview: () => {},
+    });
+    const t = root().textContent!;
+    expect(t).toContain('My Reviews');
+    expect(t).toContain('In Review');
+    expect(t).toContain('Approved');
+    expect(t).toContain('defensive audit');
+    expect(t).toContain('Approved for security team');
+  });
 });

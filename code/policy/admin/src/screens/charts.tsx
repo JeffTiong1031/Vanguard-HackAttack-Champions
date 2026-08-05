@@ -209,7 +209,7 @@ export function LineChart({
 const SEV_CLASS: Record<string, string> = { high: 'blocked', medium: 'pending', low: 'active' };
 
 export function AlertsTable({ rows }: { rows: AlertRow[] }) {
-  if (rows.length === 0) return <p class="empty">No alerts recorded in this window.</p>;
+  if (rows.length === 0) return <p class="empty">No prompt activity or alerts recorded in this window.</p>;
   return (
     <div class="table-wrap" style="max-height:360px;overflow-y:auto">
       <table>

@@ -11,17 +11,21 @@ Postgres notes vs the former SQLite version:
 """
 
 WEIGHTS_SQL = (
-    "CASE u.type WHEN 'ethics_block' THEN 5 WHEN 'pii_block' THEN 3"
-    " WHEN 'warn_shown' THEN 1 WHEN 'visit_unapproved' THEN 1 ELSE 0 END"
+    "CASE WHEN u.type = 'prompt_sent' AND u.risk_level = 'high' THEN 5"
+    " WHEN u.type = 'prompt_sent' AND u.risk_level = 'medium' THEN 3"
+    " WHEN u.type = 'prompt_sent' THEN 0"
+    " WHEN u.type = 'ethics_block' THEN 5 WHEN u.type = 'pii_block' THEN 3"
+    " WHEN u.type = 'warn_shown' THEN 1 WHEN u.type = 'visit_unapproved' THEN 1 ELSE 0 END"
 )
 SEVERITY_SQL = (
-    "CASE WHEN u.type IN ('ethics_block','pii_block') THEN 'high'"
+    "CASE WHEN u.risk_level IS NOT NULL THEN u.risk_level"
+    " WHEN u.type IN ('ethics_block','pii_block') THEN 'high'"
     " WHEN u.type = 'warn_shown' THEN 'medium' ELSE 'low' END"
 )
 ACTION_SQL = (
     "CASE u.type WHEN 'pii_block' THEN 'Blocked' WHEN 'ethics_block' THEN 'Blocked'"
     " WHEN 'warn_shown' THEN 'Warned' WHEN 'visit_unapproved' THEN 'Visited'"
-    " WHEN 'request_sent' THEN 'Requested' ELSE u.type END"
+    " WHEN 'request_sent' THEN 'Requested' WHEN 'prompt_sent' THEN 'Sent' ELSE u.type END"
 )
 _NAME = "COALESCE(NULLIF(e.name,''),'Unnamed')"
 
@@ -46,9 +50,9 @@ def analytics_summary(conn, org_id: str, days: int, department_id: str | None) -
         f"{base} GROUP BY date, e.department ORDER BY date")
     alerts_timeline = q(
         f"SELECT {tf} AS date,"
-        f" SUM(CASE WHEN u.type IN ('ethics_block','pii_block') THEN 1 ELSE 0 END) AS high,"
-        f" SUM(CASE WHEN u.type = 'warn_shown' THEN 1 ELSE 0 END) AS medium,"
-        f" SUM(CASE WHEN u.type IN ('visit_unapproved','request_sent') THEN 1 ELSE 0 END) AS low "
+        f" SUM(CASE WHEN {SEVERITY_SQL} = 'high' THEN 1 ELSE 0 END) AS high,"
+        f" SUM(CASE WHEN {SEVERITY_SQL} = 'medium' THEN 1 ELSE 0 END) AS medium,"
+        f" SUM(CASE WHEN {SEVERITY_SQL} = 'low' THEN 1 ELSE 0 END) AS low "
         f"{base} GROUP BY date ORDER BY date")
     risk_timeline = q(
         f"SELECT {tf} AS date, SUM({WEIGHTS_SQL}) AS risk "

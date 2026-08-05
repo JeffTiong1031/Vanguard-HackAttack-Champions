@@ -47,3 +47,48 @@ def test_dept_a_cannot_see_or_decide_dept_b_requests():
 
     assert all(r["id"] != req_b for r in dc_a.get("/v1/dept/requests").json())
     assert dc_a.post(f"/v1/dept/requests/{req_b}", json={"decision": "approved"}).status_code == 404
+
+
+def test_dept_temporary_and_conditional_approval():
+    org_id, dept_id, pseudo, dc = _dept_setup("TieredDept")
+    req_id = emp.post("/v1/requests", json={
+        "pseudo_id": pseudo, "llm_id": "google", "reason": "trial access"}).json()["id"]
+
+    res = dc.post(f"/v1/dept/requests/{req_id}", json={
+        "decision": "temporary",
+        "duration_days": 7,
+        "access_mode": "strict_redaction"
+    })
+    assert res.status_code == 200
+    assert res.json()["access_state"] == "temporary"
+
+    policy_res = emp.post("/v1/enroll", json={
+        "token": mint_employee_token(get_conn(), org_id, dept_id, "TieredDept")
+    }).json()["policy"]
+
+    google_tool = next(t for t in policy_res["tools"] if t["llm_id"] == "google")
+    assert google_tool["status"] == "temporary"
+    assert google_tool["access_mode"] == "strict_redaction"
+    assert google_tool["expires_at"] is not None
+
+
+def test_expired_pass_evaluates_as_blocked():
+    org_id, dept_id, pseudo, dc = _dept_setup("ExpiredDept")
+    req_id = emp.post("/v1/requests", json={
+        "pseudo_id": pseudo, "llm_id": "perplexity", "reason": "past pass"}).json()["id"]
+
+    # Post an expired pass directly into DB
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO dept_llm_policy (org_id, department_id, llm_id, status, access_mode, expires_at)"
+        " VALUES (%s, %s, %s, 'temporary', 'standard', '2020-01-01T00:00:00+00:00')"
+        " ON CONFLICT (department_id, llm_id) DO UPDATE SET status = EXCLUDED.status, expires_at = EXCLUDED.expires_at",
+        (org_id, dept_id, "perplexity"),
+    )
+    conn.commit()
+
+    from app.routes.policy_read import read_policy
+    pol = read_policy(conn, org_id, dept_id)
+    perps = next(t for t in pol.tools if t.llm_id == "perplexity")
+    assert perps.status == "blocked"
+    assert perps.expires_at is None

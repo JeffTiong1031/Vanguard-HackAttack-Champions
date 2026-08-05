@@ -38,6 +38,35 @@ def test_a_valid_batch_is_accepted_and_stored():
     assert n >= 1
 
 
+def test_a_sent_prompt_with_each_risk_level_is_accepted_and_stored():
+    pid = _enrolled_pseudo_id()
+    events = [
+        _event(type="prompt_sent", risk_level=level)
+        for level in ("low", "medium", "high")
+    ]
+    r = client.post("/v1/events", json={"pseudo_id": pid, "events": events})
+    assert r.status_code == 202
+    rows = get_conn().execute(
+        "SELECT risk_level FROM usage_events WHERE type = 'prompt_sent'"
+        " AND employee_id = (SELECT id FROM employees WHERE pseudo_id = %s)",
+        (pid,),
+    ).fetchall()
+    assert {row["risk_level"] for row in rows} == {"low", "medium", "high"}
+
+
+def test_a_sent_prompt_requires_a_valid_risk_level():
+    pid = _enrolled_pseudo_id()
+    missing = client.post("/v1/events", json={
+        "pseudo_id": pid, "events": [_event(type="prompt_sent")],
+    })
+    invalid = client.post("/v1/events", json={
+        "pseudo_id": pid,
+        "events": [_event(type="prompt_sent", risk_level="critical")],
+    })
+    assert missing.status_code == 422
+    assert invalid.status_code == 422
+
+
 def test_an_event_carrying_prompt_text_is_REJECTED_not_silently_ignored():
     """I3. A field that is ignored today is a field someone stores tomorrow."""
     pid = _enrolled_pseudo_id()

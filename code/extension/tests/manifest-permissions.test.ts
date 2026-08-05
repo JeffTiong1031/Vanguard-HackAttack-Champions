@@ -40,7 +40,9 @@ describe('manifest host_permissions', () => {
 
   it('keeps permissions minimal — no webRequest', () => {
     expect(manifest.permissions).not.toContain('webRequest');
-    expect(manifest.permissions).toEqual(expect.arrayContaining(['storage', 'offscreen']));
+    expect(manifest.permissions).toEqual(
+      expect.arrayContaining(['storage', 'offscreen', 'alarms', 'notifications']),
+    );
   });
 });
 

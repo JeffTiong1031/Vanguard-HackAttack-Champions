@@ -3,7 +3,7 @@ import { api, UnauthorisedError, type AnalyticsSummary, type AlertRow, type Scop
 import { ShieldIcon, AlertTriangleIcon, ActivityIcon, UsersIcon } from '../icons';
 import { Bars, LineChart, AlertsTable, RangeSelector, StatCard } from './charts';
 
-const WEIGHTS = 'Risk Weights: Ethics block = 5 · PII block = 3 · Warning = 1 · Unapproved visit = 1 · Access request = 0';
+const WEIGHTS = 'Risk Weights: High = 5 · Medium = 3 · Low-risk prompt = 0 · Warning / unapproved visit = 1';
 
 export function InsiderRisk({ scope }: { scope: Scope }) {
   const base = scope === 'company' ? '/v1/admin/analytics' : '/v1/dept/analytics';
@@ -16,7 +16,7 @@ export function InsiderRisk({ scope }: { scope: Scope }) {
     async function load() {
       try {
         setData(await api.get<AnalyticsSummary>(`${base}/summary?days=${days}`));
-        setAlerts(await api.get<AlertRow[]>(`${base}/alerts?limit=50`));
+        setAlerts(await api.get<AlertRow[]>(`${base}/alerts?limit=200`));
         setError('');
       } catch (err) { if (err instanceof UnauthorisedError) throw err; setError(err instanceof Error ? err.message : 'Could not load risk data.'); }
     }
@@ -71,7 +71,7 @@ export function InsiderRisk({ scope }: { scope: Scope }) {
         <StatCard
           label="Monitored Audit Stream"
           value={alerts.length.toLocaleString()}
-          sub="Recent security audit entries"
+          sub="Recent prompt and security entries"
           icon={ShieldIcon}
           color="emerald"
         />
@@ -140,8 +140,8 @@ export function InsiderRisk({ scope }: { scope: Scope }) {
         <div class="panel-head">
           <span class="ico"><AlertTriangleIcon /></span>
           <div>
-            <h2>Security Audit Stream & Violation Alerts</h2>
-            <p class="sub">Detailed real-time security events captured by Vanguard governance policies.</p>
+            <h2>Prompt Activity & Security Audit Stream</h2>
+            <p class="sub">Every sent prompt is listed with its assessed risk level, alongside governance events.</p>
           </div>
           <span class="tag count">{alerts.length} events logged</span>
         </div>

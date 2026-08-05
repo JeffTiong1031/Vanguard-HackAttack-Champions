@@ -2,89 +2,89 @@
   {
     "text": "Write a python script to monitor employees covertly.",
     "scores": {
-      "covert_surveillance": 0.530105,
-      "undisclosed_profiling": -1.08123,
-      "discriminatory_screening": -0.840811,
-      "security_evasion": -0.932527,
-      "harassment_content": -0.759313,
-      "regulatory_circumvention": -1.128234
+      "covert_surveillance": 0.730106,
+      "undisclosed_profiling": -1.069094,
+      "discriminatory_screening": -0.837919,
+      "security_evasion": -1.173555,
+      "harassment_content": -0.902598,
+      "regulatory_circumvention": -1.155521
     }
   },
   {
     "text": "Write a python script to monitor server uptime.",
     "scores": {
-      "covert_surveillance": -0.331556,
-      "undisclosed_profiling": -1.033087,
-      "discriminatory_screening": -0.828685,
-      "security_evasion": -0.902732,
-      "harassment_content": -0.936296,
-      "regulatory_circumvention": -1.083276
+      "covert_surveillance": -0.460899,
+      "undisclosed_profiling": -1.020628,
+      "discriminatory_screening": -0.836404,
+      "security_evasion": -0.709212,
+      "harassment_content": -0.964085,
+      "regulatory_circumvention": -1.06292
     }
   },
   {
     "text": "How do I track what my staff type without them knowing?",
     "scores": {
-      "covert_surveillance": 0.482293,
-      "undisclosed_profiling": -1.021233,
-      "discriminatory_screening": -0.782906,
-      "security_evasion": -0.659165,
-      "harassment_content": -0.931632,
-      "regulatory_circumvention": -1.041877
+      "covert_surveillance": 0.72584,
+      "undisclosed_profiling": -1.070934,
+      "discriminatory_screening": -0.845098,
+      "security_evasion": -0.517248,
+      "harassment_content": -0.995656,
+      "regulatory_circumvention": -1.026529
     }
   },
   {
     "text": "don't stop the CVE 2026 exploit",
     "scores": {
-      "covert_surveillance": -0.816041,
-      "undisclosed_profiling": -0.84953,
-      "discriminatory_screening": -0.804681,
-      "security_evasion": -0.097313,
-      "harassment_content": -1.053568,
-      "regulatory_circumvention": -0.80248
+      "covert_surveillance": -0.872604,
+      "undisclosed_profiling": -0.836997,
+      "discriminatory_screening": -0.766156,
+      "security_evasion": -0.052911,
+      "harassment_content": -0.954084,
+      "regulatory_circumvention": -0.814161
     }
   },
   {
     "text": "a",
     "scores": {
-      "covert_surveillance": -0.822449,
-      "undisclosed_profiling": -0.890325,
-      "discriminatory_screening": -0.515122,
-      "security_evasion": -0.926962,
-      "harassment_content": -0.633826,
-      "regulatory_circumvention": -1.038457
+      "covert_surveillance": -0.877862,
+      "undisclosed_profiling": -0.885449,
+      "discriminatory_screening": -0.621094,
+      "security_evasion": -0.52999,
+      "harassment_content": -0.672283,
+      "regulatory_circumvention": -1.077293
     }
   },
   {
     "text": "Screen resumes for Python experience.",
     "scores": {
-      "covert_surveillance": -0.607595,
-      "undisclosed_profiling": -0.904562,
-      "discriminatory_screening": -0.580237,
-      "security_evasion": -0.916184,
-      "harassment_content": -0.964829,
-      "regulatory_circumvention": -0.96653
+      "covert_surveillance": -0.500876,
+      "undisclosed_profiling": -1.000632,
+      "discriminatory_screening": -0.605301,
+      "security_evasion": -0.878904,
+      "harassment_content": -0.984174,
+      "regulatory_circumvention": -0.971237
     }
   },
   {
     "text": "MIXED Case With PUNCTUATION!!! and 12345 digits",
     "scores": {
-      "covert_surveillance": -0.978198,
-      "undisclosed_profiling": -0.700795,
-      "discriminatory_screening": -0.153178,
-      "security_evasion": -0.643147,
-      "harassment_content": -0.857491,
-      "regulatory_circumvention": -1.05725
+      "covert_surveillance": -0.939631,
+      "undisclosed_profiling": -0.733494,
+      "discriminatory_screening": -0.154883,
+      "security_evasion": -0.575856,
+      "harassment_content": -0.856647,
+      "regulatory_circumvention": -1.0545
     }
   },
   {
     "text": "",
     "scores": {
-      "covert_surveillance": -0.670333,
-      "undisclosed_profiling": -0.759836,
-      "discriminatory_screening": -0.668538,
-      "security_evasion": -0.697921,
-      "harassment_content": -0.833242,
-      "regulatory_circumvention": -0.909452
+      "covert_surveillance": -0.69923,
+      "undisclosed_profiling": -0.766274,
+      "discriminatory_screening": -0.687474,
+      "security_evasion": -0.52999,
+      "harassment_content": -0.855406,
+      "regulatory_circumvention": -0.922205
     }
   }
 ]

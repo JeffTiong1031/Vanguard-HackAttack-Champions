@@ -134,7 +134,7 @@ async def regenerate_department(
 async def list_tools(vg_admin: str | None = Cookie(default=None)) -> list[dict]:
     org_id = require_company(vg_admin)
     return [dict(r) for r in get_conn().execute(
-        "SELECT r.id AS llm_id, r.host, r.display_name, p.status"
+        "SELECT r.id AS llm_id, r.host, r.display_name, p.status, p.access_mode, p.expires_at"
         " FROM llm_registry r JOIN org_llm_policy p ON p.llm_id = r.id"
         " WHERE p.org_id = %s ORDER BY r.display_name",
         (org_id,),
@@ -145,15 +145,29 @@ async def list_tools(vg_admin: str | None = Cookie(default=None)) -> list[dict]:
 async def set_tool(
     llm_id: str,
     status: str = Body(embed=True),
+    access_mode: str = Body(default="standard", embed=True),
+    duration_days: int | None = Body(default=None, embed=True),
+    expires_at: str | None = Body(default=None, embed=True),
     vg_admin: str | None = Cookie(default=None),
 ) -> dict[str, int]:
+    from datetime import datetime, timedelta, timezone
+
     org_id = require_company(vg_admin)
-    if status not in ("approved", "blocked"):
-        raise HTTPException(status_code=422, detail="status must be approved or blocked")
+    if status not in ("approved", "blocked", "temporary", "trial", "conditional"):
+        raise HTTPException(status_code=422, detail="invalid status")
+    if access_mode not in ("standard", "strict_redaction", "no_file_uploads"):
+        raise HTTPException(status_code=422, detail="invalid access_mode")
+
+    final_expires_at = None
+    if duration_days:
+        final_expires_at = (datetime.now(timezone.utc) + timedelta(days=duration_days)).isoformat()
+    elif expires_at:
+        final_expires_at = expires_at
+
     conn = get_conn()
     cur = conn.execute(
-        "UPDATE org_llm_policy SET status = %s WHERE org_id = %s AND llm_id = %s",
-        (status, org_id, llm_id),
+        "UPDATE org_llm_policy SET status = %s, access_mode = %s, expires_at = %s WHERE org_id = %s AND llm_id = %s",
+        (status, access_mode, final_expires_at, org_id, llm_id),
     )
     if cur.rowcount == 0:
         raise HTTPException(status_code=404, detail="unknown tool")
@@ -169,8 +183,8 @@ async def list_requests(vg_admin: str | None = Cookie(default=None)) -> list[dic
     the company dashboard can see every department's queue but cannot act on it."""
     org_id = require_company(vg_admin)
     return [dict(r) for r in get_conn().execute(
-        "SELECT a.id, a.reason, a.status, a.reason_code, a.admin_note, a.created_at, e.department,"
-        "       CASE WHEN a.status = 'approved' THEN 'approved' ELSE 'blocked' END AS access_state,"
+        "SELECT a.id, a.reason, a.status, a.access_mode, a.expires_at, a.reason_code, a.admin_note, a.created_at, e.department,"
+        "       CASE WHEN a.status IN ('approved','temporary','trial','conditional') THEN a.status ELSE 'blocked' END AS access_state,"
         "       r.display_name, r.host, a.llm_id"
         " FROM access_requests a"
         " JOIN employees e ON e.id = a.employee_id"

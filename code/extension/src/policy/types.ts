@@ -27,12 +27,16 @@ export type Enrolment = {
 };
 
 export type GovernanceEventType =
-  | 'visit_unapproved' | 'warn_shown' | 'request_sent' | 'ethics_block' | 'pii_block';
+  | 'visit_unapproved' | 'warn_shown' | 'request_sent' | 'ethics_block' | 'pii_block'
+  | 'prompt_sent';
+
+export type RiskLevel = 'low' | 'medium' | 'high';
 
 export type GovernanceEvent = {
   host: string;
   type: GovernanceEventType;
   category?: string;
   finding_hash?: string;
+  risk_level?: RiskLevel;
   ts: string;
 };

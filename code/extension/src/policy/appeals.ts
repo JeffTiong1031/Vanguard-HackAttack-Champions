@@ -41,7 +41,10 @@ export async function submitAppeal(input: AppealInput): Promise<void> {
     reason: input.reason,
   };
   if (input.disclosedText) body.disclosed_text = input.disclosedText;
-  if (input.promptHash) body.prompt_hash = input.promptHash;
+  if (input.promptHash) {
+    body.prompt_hash = input.promptHash;
+    body.scope_fingerprint = input.promptHash;
+  }
   const res = await fetch(`${base}/v1/appeals`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -51,25 +54,19 @@ export async function submitAppeal(input: AppealInput): Promise<void> {
 }
 
 /**
- * Grant a one-time pass if `promptHash` is an active overturned allowance.
- * Checks the server list and, on a hit, burns the pass immediately so it can
- * never be handed out twice. Returns true when a pass was granted.
+ * Returns true when `promptHash` matches an appeal that was approved by a manager.
+ * Uses the persistent /v1/appeals/approved-scopes endpoint — approved prompts
+ * are never consumed/burned and remain passable until the policy changes.
  */
 export async function grantPassIfAllowed(promptHash: string): Promise<boolean> {
   const enrolment = await getEnrolment();
   if (!enrolment) return false;
   const base = await getPolicyBase();
   try {
-    const res = await fetch(`${base}/v1/appeals/allowances?pseudo_id=${encodeURIComponent(enrolment.pseudo_id)}`);
+    const res = await fetch(`${base}/v1/appeals/approved-scopes?pseudo_id=${encodeURIComponent(enrolment.pseudo_id)}`);
     if (!res.ok) return false;
-    const hashes = (await res.json()) as string[];
-    if (!hashes.includes(promptHash)) return false;
-    await fetch(`${base}/v1/appeals/allowances/consume`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ pseudo_id: enrolment.pseudo_id, prompt_hash: promptHash }),
-    });
-    return true;
+    const approvedScopes = (await res.json()) as string[];
+    return approvedScopes.includes(promptHash);
   } catch {
     return false;
   }

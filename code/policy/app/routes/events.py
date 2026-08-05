@@ -28,11 +28,11 @@ async def ingest(batch: EventBatch) -> dict[str, int]:
 
     conn.executemany(
         "INSERT INTO usage_events"
-        " (id, org_id, employee_id, host, type, category, finding_hash, ts)"
-        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+        " (id, org_id, employee_id, host, type, category, finding_hash, risk_level, ts)"
+        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
         [
             (uuid.uuid4().hex, row["org_id"], row["id"], e.host, e.type,
-             e.category, e.finding_hash, e.ts)
+             e.category, e.finding_hash, e.risk_level, e.ts)
             for e in batch.events
         ],
     )

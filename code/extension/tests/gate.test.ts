@@ -22,10 +22,19 @@ describe('decideGate (pure core of the listener)', () => {
     c.setDirty('h', [{ cls: 'NRIC', start: 0, end: 1, text: 'x' }]);
     expect(decideGate({ hash: 'h', cache: c, approvedHash: null })).toBe('BLOCK');
   });
-  it('passes when the DIRTY text has a matching approval', () => {
+  it('passes when the DIRTY text has a matching approval and burns the token', () => {
     const c = new VerdictCache();
     c.setDirty('h', []);
-    expect(decideGate({ hash: 'h', cache: c, approvedHash: 'h' })).toBe('PASS');
+    const consume = vi.fn();
+    expect(decideGate({ hash: 'h', cache: c, approvedHash: 'h', consumeApproval: consume })).toBe('PASS');
+    expect(consume).toHaveBeenCalledOnce();
+  });
+  it('does NOT call consumeApproval for a CLEAN pass (no approval involved)', () => {
+    const c = new VerdictCache();
+    c.setClean('h', []);
+    const consume = vi.fn();
+    expect(decideGate({ hash: 'h', cache: c, approvedHash: null, consumeApproval: consume })).toBe('PASS');
+    expect(consume).not.toHaveBeenCalled();
   });
   it('passes CLEAN', () => {
     const c = new VerdictCache();
@@ -53,6 +62,19 @@ describe('decideGate (pure core of the listener)', () => {
     expect(decideGate({ hash: 'h', cache: c, approvedHash: null })).toBe('PASS');
     expect(decideGate({ hash: 'h', cache: c, approvedHash: 'other' })).toBe('PASS');
   });
+  it('blocks even CLEAN prompts when shouldBlock returns true (e.g. ethics violation)', () => {
+    const c = new VerdictCache();
+    c.setClean('h', []);
+    expect(
+      decideGate({
+        hash: 'h',
+        cache: c,
+        approvedHash: null,
+        text: 'help me write code to hack someone',
+        shouldBlock: () => true,
+      }),
+    ).toBe('BLOCK');
+  });
 });
 
 describe('installGate', () => {
@@ -75,6 +97,7 @@ describe('installGate', () => {
       isSendIntent: () => false,
       hashOf: () => 'h',
       approvedHash: () => null,
+      consumeApproval: () => {},
       onBlocked: () => {},
     });
 
@@ -99,6 +122,7 @@ describe('installGate', () => {
       isSendIntent,
       hashOf: () => 'h',
       approvedHash: () => null,
+      consumeApproval: () => {},
       onBlocked,
     });
     const keydown = addEventListener.mock.calls.find((c) => c[0] === 'keydown')![1] as (
@@ -141,6 +165,7 @@ describe('installGate', () => {
       isSendIntent: (_event, path) => chatgptAdapter.isSendControl(path),
       hashOf: (text) => text.startsWith('NRIC') ? 'edit-hash' : 'clean-hash',
       approvedHash: () => null,
+      consumeApproval: () => {},
       onBlocked,
     });
     const click = addEventListener.mock.calls.find((c) => c[0] === 'click')![1] as (
@@ -179,6 +204,7 @@ describe('installGate', () => {
       isSendIntent: (event) => event.type === 'submit',
       hashOf: () => 'edit-hash',
       approvedHash: () => null,
+      consumeApproval: () => {},
       onBlocked,
     });
     const submit = addEventListener.mock.calls.find((c) => c[0] === 'submit')![1] as (
@@ -196,5 +222,71 @@ describe('installGate', () => {
 
     expect(event.preventDefault).toHaveBeenCalledOnce();
     expect(onBlocked).toHaveBeenCalledWith('alice@example.com');
+  });
+
+  it('reports the prompt when a clean send is allowed', () => {
+    const cache = new VerdictCache();
+    cache.setClean('clean-hash', []);
+    const onAllowed = vi.fn();
+    installGate({
+      cache,
+      getComposerText: () => 'ordinary prompt',
+      isSendIntent: () => true,
+      hashOf: () => 'clean-hash',
+      approvedHash: () => null,
+      consumeApproval: () => {},
+      onBlocked: () => {},
+      onAllowed,
+    });
+    const keydown = addEventListener.mock.calls.find((c) => c[0] === 'keydown')![1] as (
+      e: Event,
+    ) => void;
+    keydown({
+      eventPhase: Event.CAPTURING_PHASE,
+      isComposing: false,
+      composedPath: () => [document.body],
+    } as unknown as KeyboardEvent);
+
+    expect(onAllowed).toHaveBeenCalledWith('ordinary prompt');
+  });
+
+  it('burns the approval after first approved send so the same prompt cannot be re-sent', () => {
+    const cache = new VerdictCache();
+    cache.setDirty('approved-hash', [{ cls: 'NRIC', start: 0, end: 1, text: 'x' }]);
+    let currentHash: string | null = 'approved-hash';
+    const consumeApproval = vi.fn((hash: string) => {
+      if (currentHash === hash) currentHash = null;
+    });
+    const onBlocked = vi.fn();
+    const onAllowed = vi.fn();
+    installGate({
+      cache,
+      getComposerText: () => 'dirty prompt',
+      isSendIntent: () => true,
+      hashOf: () => 'approved-hash',
+      approvedHash: () => currentHash,
+      consumeApproval,
+      onBlocked,
+      onAllowed,
+    });
+    const keydown = addEventListener.mock.calls.find((c) => c[0] === 'keydown')![1] as (
+      e: Event,
+    ) => void;
+    const makeEvent = () => ({
+      eventPhase: Event.CAPTURING_PHASE,
+      isComposing: false,
+      composedPath: () => [document.body],
+      stopImmediatePropagation: vi.fn(),
+      preventDefault: vi.fn(),
+    } as unknown as KeyboardEvent);
+
+    // First send: allowed (approval matches) and token is burned
+    keydown(makeEvent());
+    expect(onAllowed).toHaveBeenCalledOnce();
+    expect(consumeApproval).toHaveBeenCalledOnce();
+
+    // Second send: approval is gone, prompt is still DIRTY -> blocked
+    keydown(makeEvent());
+    expect(onBlocked).toHaveBeenCalledOnce();
   });
 });
