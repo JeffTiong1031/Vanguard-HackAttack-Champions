@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "U31 generic write-back probe",
+  "version": "0.1",
+  "description": "MEASUREMENT INSTRUMENT. Not a product. Logs raw observations only.",
+  "permissions": ["clipboardWrite"],
+  "host_permissions": [
+    "https://chatgpt.com/*", "https://claude.ai/*",
+    "https://gemini.google.com/*", "https://copilot.microsoft.com/*",
+    "https://www.perplexity.ai/*", "https://chat.deepseek.com/*",
+    "https://chat.mistral.ai/*", "https://grok.com/*"
+  ],
+  "content_scripts": [{
+    "matches": [
+      "https://chatgpt.com/*", "https://claude.ai/*",
+      "https://gemini.google.com/*", "https://copilot.microsoft.com/*",
+      "https://www.perplexity.ai/*", "https://chat.deepseek.com/*",
+      "https://chat.mistral.ai/*", "https://grok.com/*"
+    ],
+    "js": ["probe.js"],
+    "run_at": "document_idle",
+    "world": "ISOLATED"
+  }]
+}
