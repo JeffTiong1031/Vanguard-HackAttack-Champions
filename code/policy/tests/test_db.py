@@ -80,13 +80,26 @@ def test_employees_table_has_no_email_column():
     included in the allowed set deliberately. `name` (added by the analytics
     migration, 2026-08-04) is an admin-supplied label carried from
     `enroll_tokens.name` -- an org-chosen display string, not employee-typed
-    PII, and explicitly in scope per the analytics spec. The assertion's job
-    is to catch an EMAIL column -- the one identifier this schema must never
-    be able to hold -- not to freeze the column count.
+    PII, and explicitly in scope per the analytics spec. `enroll_token_id`
+    (added on the token-identity branch) is a foreign key into
+    `enroll_tokens.id` -- an opaque internal identifier, not a name, email,
+    or anything employee-typed; it carries no personal data. It exists so
+    that revoking a token can deprovision the employee it enrolled.
+
+    The exact-set comparison below is maintained deliberately: every new
+    column has to be vetted against the pseudonymity property and added here
+    explicitly, with a reason, before the test will pass. That is the
+    assertion's real job -- not to freeze the column count for its own sake,
+    but to force a reviewer to look at each addition. Catching an EMAIL
+    column -- the one identifier this schema must never be able to hold --
+    is what that vetting is for.
     """
     conn = get_conn()
     cols = _col_names(conn, "employees")
-    assert cols == {"id", "org_id", "pseudo_id", "department", "department_id", "name", "created_at"}
+    assert cols == {
+        "id", "org_id", "pseudo_id", "department", "department_id",
+        "name", "enroll_token_id", "created_at",
+    }
     assert not cols & {"email", "email_address"}
 
 
