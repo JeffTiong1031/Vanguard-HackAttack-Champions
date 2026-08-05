@@ -25,7 +25,7 @@ def _current_version(conn, org_id: str) -> int:
 async def dept_requests(vg_admin: str | None = Cookie(default=None)) -> list[dict]:
     org_id, dept_id = require_department(vg_admin)
     return [dict(r) for r in get_conn().execute(
-        "SELECT a.id, a.reason, a.status, a.created_at, e.department,"
+        "SELECT a.id, a.reason, a.status, a.access_mode, a.expires_at, a.created_at, e.department,"
         "       r.display_name, r.host, a.llm_id"
         " FROM access_requests a"
         " JOIN employees e ON e.id = a.employee_id"
@@ -40,10 +40,14 @@ async def dept_decide_request(
     request_id: str, body: AccessDecision,
     vg_admin: str | None = Cookie(default=None),
 ) -> dict[str, int | str]:
+    from datetime import datetime, timedelta, timezone
+
     org_id, dept_id = require_department(vg_admin)
     conn = get_conn()
     row = conn.execute(
-        "SELECT a.llm_id FROM access_requests a JOIN employees e ON e.id = a.employee_id"
+        "SELECT a.llm_id, a.employee_id, r.display_name FROM access_requests a"
+        " JOIN employees e ON e.id = a.employee_id"
+        " LEFT JOIN llm_registry r ON r.id = a.llm_id"
         " WHERE a.id = %s AND a.org_id = %s AND e.department_id = %s AND a.status = 'pending'",
         (request_id, org_id, dept_id),
     ).fetchone()
@@ -56,21 +60,46 @@ async def dept_decide_request(
         raise HTTPException(status_code=404 if exists is None else 409,
                             detail="unknown request" if exists is None else "request already decided")
 
+    expires_at = None
+    if body.duration_days:
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=body.duration_days)).isoformat()
+    elif body.expires_at:
+        expires_at = body.expires_at
+
     conn.execute(
-        "UPDATE access_requests SET status = %s, reason_code = %s, admin_note = %s, decided_at = %s"
+        "UPDATE access_requests SET status = %s, reason_code = %s, admin_note = %s, decided_at = %s,"
+        " access_mode = %s, expires_at = %s"
         " WHERE id = %s",
-        (body.decision, body.reason_code, body.note, now_iso(), request_id),
+        (body.decision, body.reason_code, body.note, now_iso(), body.access_mode, expires_at, request_id),
     )
-    if body.decision == "approved":
+
+    from app.routes.notifications import create_notification
+    tool_name = row["display_name"] if row and row.get("display_name") else row["llm_id"]
+    title = f"Access Request {body.decision.capitalize()}: {tool_name}"
+    msg_text = f"Your request for access to {tool_name} was reviewed and set to {body.decision.upper()}."
+    if body.note:
+        msg_text += f" Manager note: {body.note}"
+    create_notification(conn, org_id, row["employee_id"], "request_decision", title, msg_text)
+
+    if body.decision != "blocked":
         conn.execute(
-            "INSERT INTO dept_llm_policy (org_id, department_id, llm_id, status)"
-            " VALUES (%s, %s, %s, 'approved')"
-            " ON CONFLICT (department_id, llm_id) DO UPDATE SET status = 'approved'",
-            (org_id, dept_id, row["llm_id"]),
+            "INSERT INTO dept_llm_policy (org_id, department_id, llm_id, status, access_mode, expires_at)"
+            " VALUES (%s, %s, %s, %s, %s, %s)"
+            " ON CONFLICT (department_id, llm_id) DO UPDATE SET status = EXCLUDED.status,"
+            " access_mode = EXCLUDED.access_mode, expires_at = EXCLUDED.expires_at",
+            (org_id, dept_id, row["llm_id"], body.decision, body.access_mode, expires_at),
         )
-        return {"version": bump_policy_version(conn, org_id), "access_state": "approved"}
+        return {"version": bump_policy_version(conn, org_id), "access_state": body.decision}
+
+    conn.execute(
+        "INSERT INTO dept_llm_policy (org_id, department_id, llm_id, status, access_mode, expires_at)"
+        " VALUES (%s, %s, %s, 'blocked', 'standard', NULL)"
+        " ON CONFLICT (department_id, llm_id) DO UPDATE SET status = 'blocked',"
+        " access_mode = 'standard', expires_at = NULL",
+        (org_id, dept_id, row["llm_id"]),
+    )
     conn.commit()
-    return {"version": _current_version(conn, org_id), "access_state": "blocked"}
+    return {"version": bump_policy_version(conn, org_id), "access_state": "blocked"}
 
 
 @router.get("/appeals")
@@ -94,7 +123,8 @@ async def dept_decide_appeal(
     org_id, dept_id = require_department(vg_admin)
     conn = get_conn()
     row = conn.execute(
-        "SELECT 1 FROM decision_appeals a JOIN employees e ON e.id = a.employee_id"
+        "SELECT a.employee_id, a.category, a.decision_type FROM decision_appeals a"
+        " JOIN employees e ON e.id = a.employee_id"
         " WHERE a.id = %s AND a.org_id = %s AND e.department_id = %s AND a.status = 'pending'",
         (appeal_id, org_id, dept_id),
     ).fetchone()
@@ -111,6 +141,15 @@ async def dept_decide_appeal(
         " WHERE id = %s",
         (body.decision, body.reason_code, body.note, now_iso(), appeal_id),
     )
+
+    from app.routes.notifications import create_notification
+    cat_name = row["category"].replace("_", " ").title() if row and row.get("category") else "Ethics Review"
+    title = f"Review Appeal {body.decision.capitalize()}: {cat_name}"
+    msg_text = f"Your appeal for {cat_name} was reviewed and set to {body.decision.upper()}."
+    if body.note:
+        msg_text += f" Manager note: {body.note}"
+    create_notification(conn, org_id, row["employee_id"], "appeal_decision", title, msg_text)
+
     conn.commit()
     return {"status": body.decision, "access_state": body.decision}
 

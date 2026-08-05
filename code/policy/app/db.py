@@ -33,9 +33,10 @@ class _Connection:
     def execute(self, sql: str, params=()) -> psycopg2.extras.RealDictCursor:
         if self._conn.get_transaction_status() == psycopg2.extensions.TRANSACTION_STATUS_INERROR:
             self._conn.rollback()
+        sql_pg = sql.replace("?", "%s").replace("datetime('now')", "NOW()").replace("datetime('now', 'localtime')", "NOW()")
         cur = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         try:
-            cur.execute(sql, params or ())
+            cur.execute(sql_pg, params or ())
             return cur
         except Exception:
             self._conn.rollback()
@@ -44,9 +45,10 @@ class _Connection:
     def executemany(self, sql: str, seq) -> None:
         if self._conn.get_transaction_status() == psycopg2.extensions.TRANSACTION_STATUS_INERROR:
             self._conn.rollback()
+        sql_pg = sql.replace("?", "%s").replace("datetime('now')", "NOW()").replace("datetime('now', 'localtime')", "NOW()")
         cur = self._conn.cursor()
         try:
-            cur.executemany(sql, seq)
+            cur.executemany(sql_pg, seq)
         except Exception:
             self._conn.rollback()
             raise
@@ -71,7 +73,6 @@ class _Connection:
 
     def close(self) -> None:
         self._conn.close()
-
 
 
 SCHEMA = """
@@ -123,7 +124,9 @@ CREATE TABLE IF NOT EXISTS llm_registry (
 CREATE TABLE IF NOT EXISTS org_llm_policy (
     org_id TEXT NOT NULL REFERENCES orgs(id),
     llm_id TEXT NOT NULL REFERENCES llm_registry(id),
-    status TEXT NOT NULL CHECK (status IN ('approved', 'blocked')),
+    status TEXT NOT NULL CHECK (status IN ('approved', 'blocked', 'temporary', 'trial', 'conditional')),
+    access_mode TEXT NOT NULL DEFAULT 'standard' CHECK (access_mode IN ('standard', 'strict_redaction', 'no_file_uploads')),
+    expires_at TEXT,
     PRIMARY KEY (org_id, llm_id)
 );
 
@@ -141,11 +144,13 @@ CREATE TABLE IF NOT EXISTS access_requests (
     employee_id TEXT NOT NULL REFERENCES employees(id),
     llm_id      TEXT NOT NULL REFERENCES llm_registry(id),
     reason      TEXT NOT NULL,
-    status      TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'blocked')),
+    status      TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'blocked', 'temporary', 'trial', 'conditional')),
     created_at  TEXT NOT NULL,
     decided_at  TEXT,
     admin_note  TEXT,
-    reason_code TEXT
+    reason_code TEXT,
+    access_mode TEXT DEFAULT 'standard',
+    expires_at  TEXT
 );
 
 CREATE TABLE IF NOT EXISTS decision_appeals (
@@ -156,7 +161,7 @@ CREATE TABLE IF NOT EXISTS decision_appeals (
     category        TEXT NOT NULL,
     employee_reason TEXT NOT NULL,
     disclosed_text  TEXT,
-    status          TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'blocked')),
+    status          TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'blocked', 'temporary', 'trial', 'conditional')),
     admin_note      TEXT,
     created_at      TEXT NOT NULL,
     decided_at      TEXT,
@@ -172,6 +177,7 @@ CREATE TABLE IF NOT EXISTS usage_events (
     type         TEXT NOT NULL,
     category     TEXT,
     finding_hash TEXT,
+    risk_level   TEXT CHECK (risk_level IN ('low', 'medium', 'high')),
     ts           TEXT NOT NULL
 );
 
@@ -187,13 +193,27 @@ CREATE TABLE IF NOT EXISTS dept_llm_policy (
     org_id        TEXT NOT NULL REFERENCES orgs(id),
     department_id TEXT NOT NULL REFERENCES departments(id),
     llm_id        TEXT NOT NULL REFERENCES llm_registry(id),
-    status        TEXT NOT NULL CHECK (status IN ('approved','blocked')),
+    status        TEXT NOT NULL CHECK (status IN ('approved','blocked','temporary','trial','conditional')),
+    access_mode   TEXT NOT NULL DEFAULT 'standard' CHECK (access_mode IN ('standard', 'strict_redaction', 'no_file_uploads')),
+    expires_at    TEXT,
     PRIMARY KEY (department_id, llm_id)
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id           TEXT PRIMARY KEY,
+    org_id       TEXT NOT NULL REFERENCES orgs(id),
+    employee_id  TEXT NOT NULL REFERENCES employees(id),
+    kind         TEXT NOT NULL,
+    title        TEXT NOT NULL,
+    message      TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'unread',
+    created_at   TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS ix_events_org_ts ON usage_events (org_id, ts);
 CREATE INDEX IF NOT EXISTS ix_requests_org_status ON access_requests (org_id, status);
 CREATE INDEX IF NOT EXISTS ix_appeals_org_status ON decision_appeals (org_id, status);
+CREATE INDEX IF NOT EXISTS ix_notifications_emp ON notifications (employee_id, status);
 """
 
 
@@ -211,34 +231,46 @@ def init_schema(conn: "_Connection") -> None:
 # Incremental migrations (idempotent — safe to run on every startup)
 # ---------------------------------------------------------------------------
 _MIGRATIONS = [
-    # M001: admin feedback on access-request decisions
+    "ALTER TABLE org_llm_policy ADD COLUMN IF NOT EXISTS access_mode TEXT NOT NULL DEFAULT 'standard';",
+    "ALTER TABLE org_llm_policy ADD COLUMN IF NOT EXISTS expires_at TEXT;",
+    "ALTER TABLE dept_llm_policy ADD COLUMN IF NOT EXISTS access_mode TEXT NOT NULL DEFAULT 'standard';",
+    "ALTER TABLE dept_llm_policy ADD COLUMN IF NOT EXISTS expires_at TEXT;",
+    "ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS access_mode TEXT DEFAULT 'standard';",
+    "ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS expires_at TEXT;",
     "ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS admin_note TEXT;",
-    """ALTER TABLE access_requests DROP CONSTRAINT IF EXISTS access_requests_status_check;
-       UPDATE access_requests SET status = 'blocked' WHERE status = 'denied';
-       ALTER TABLE access_requests ADD CONSTRAINT access_requests_status_check
-         CHECK (status IN ('pending', 'approved', 'blocked'));""",
     "ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS reason_code TEXT;",
-    """ALTER TABLE decision_appeals DROP CONSTRAINT IF EXISTS decision_appeals_status_check;
-       UPDATE decision_appeals SET status = CASE
-         WHEN status = 'overturned' THEN 'approved'
-         WHEN status = 'upheld' THEN 'blocked'
-         ELSE status END;
-       ALTER TABLE decision_appeals ADD CONSTRAINT decision_appeals_status_check
-         CHECK (status IN ('pending', 'approved', 'blocked'));""",
     "ALTER TABLE decision_appeals ADD COLUMN IF NOT EXISTS scope_fingerprint TEXT;",
     "ALTER TABLE decision_appeals ADD COLUMN IF NOT EXISTS reason_code TEXT;",
-    """DO $$ BEGIN
-         IF EXISTS (
-           SELECT 1 FROM information_schema.columns
-           WHERE table_schema = 'public' AND table_name = 'decision_appeals'
-             AND column_name = 'prompt_hash'
-         ) THEN
-           EXECUTE 'UPDATE decision_appeals SET scope_fingerprint = prompt_hash '
-                   'WHERE scope_fingerprint IS NULL AND prompt_hash IS NOT NULL';
-         END IF;
-       END $$;""",
-    "ALTER TABLE decision_appeals DROP COLUMN IF EXISTS prompt_hash;",
-    "ALTER TABLE decision_appeals DROP COLUMN IF EXISTS pass_used;",
+    "ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS risk_level TEXT;",
+    """CREATE TABLE IF NOT EXISTS notifications (
+        id           TEXT PRIMARY KEY,
+        org_id       TEXT NOT NULL REFERENCES orgs(id),
+        employee_id  TEXT NOT NULL REFERENCES employees(id),
+        kind         TEXT NOT NULL,
+        title        TEXT NOT NULL,
+        message      TEXT NOT NULL,
+        status       TEXT NOT NULL DEFAULT 'unread',
+        created_at   TEXT NOT NULL
+    );""",
+    """DO $$
+    DECLARE
+        r RECORD;
+    BEGIN
+        FOR r IN (
+            SELECT c.conname, t.relname 
+            FROM pg_constraint c 
+            JOIN pg_class t ON c.conrelid = t.oid 
+            WHERE c.contype = 'c' 
+              AND t.relname IN ('org_llm_policy', 'dept_llm_policy', 'access_requests', 'decision_appeals')
+        ) LOOP
+            EXECUTE 'ALTER TABLE ' || quote_ident(r.relname) || ' DROP CONSTRAINT IF EXISTS ' || quote_ident(r.conname);
+        END LOOP;
+
+        EXECUTE 'ALTER TABLE org_llm_policy ADD CONSTRAINT org_llm_policy_status_check CHECK (status IN (''approved'', ''blocked'', ''temporary'', ''trial'', ''conditional''))';
+        EXECUTE 'ALTER TABLE dept_llm_policy ADD CONSTRAINT dept_llm_policy_status_check CHECK (status IN (''approved'', ''blocked'', ''temporary'', ''trial'', ''conditional''))';
+        EXECUTE 'ALTER TABLE access_requests ADD CONSTRAINT access_requests_status_check CHECK (status IN (''pending'', ''approved'', ''blocked'', ''temporary'', ''trial'', ''conditional''))';
+        EXECUTE 'ALTER TABLE decision_appeals ADD CONSTRAINT decision_appeals_status_check CHECK (status IN (''pending'', ''approved'', ''blocked'', ''temporary'', ''trial'', ''conditional''))';
+    END $$;""",
 ]
 
 
@@ -248,27 +280,21 @@ def migrate_schema(conn: "_Connection") -> None:
     Each statement is idempotent (IF NOT EXISTS / IF EXISTS guards).
     Run AFTER init_schema on every startup so new deployments catch up.
     """
-    for sql in _MIGRATIONS:
+    for stmt in _MIGRATIONS:
         try:
-            conn.execute(sql)
+            conn.execute(stmt)
             conn.commit()
         except Exception:
-            # Column already exists or equivalent — safe to ignore.
-            conn.rollback()
-
+            # Drop constraint / alter table failure can happen if already matching schema
+            pass
 
 
 def bump_policy_version(conn: "_Connection", org_id: str) -> int:
-    """Increment and return the org's policy version.
-
-    Every write that changes what an extension would see MUST call this. It is
-    the ETag, so a missed bump means a stale client that never refreshes.
-    """
-    conn.execute(
-        "UPDATE orgs SET policy_version = policy_version + 1 WHERE id = %s", (org_id,)
+    """Increment policy_version for an org and return the new version integer."""
+    cur = conn.execute(
+        "UPDATE orgs SET policy_version = policy_version + 1 WHERE id = %s RETURNING policy_version",
+        (org_id,),
     )
+    row = cur.fetchone()
     conn.commit()
-    row = conn.execute(
-        "SELECT policy_version FROM orgs WHERE id = %s", (org_id,)
-    ).fetchone()
     return int(row["policy_version"])

@@ -11,3 +11,5 @@ ml/artifacts/
 # code/policy/
 policy.db
 code/policy/app/static/
+node_modules/
+admin/node_modules/

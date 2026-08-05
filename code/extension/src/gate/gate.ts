@@ -1,7 +1,20 @@
 import type { VerdictCache } from '../detection/verdict-cache';
 
-export function decideGate(a: { hash: string; cache: VerdictCache; approvedHash: string | null }): 'PASS' | 'BLOCK' {
-  if (a.approvedHash === a.hash) return 'PASS';
+export function decideGate(a: {
+  hash: string;
+  cache: VerdictCache;
+  approvedHash: string | null;
+  text?: string;
+  shouldBlock?: (text: string) => boolean;
+  /** If provided, called ONLY when the decision is PASS-via-approval. Burns the
+   *  single-use token so the same prompt cannot be re-sent without a new review. */
+  consumeApproval?: () => void;
+}): 'PASS' | 'BLOCK' {
+  if (a.approvedHash === a.hash) {
+    a.consumeApproval?.();
+    return 'PASS';
+  }
+  if (a.text && a.shouldBlock?.(a.text)) return 'BLOCK';
   const v = a.cache.getSync(a.hash);
   if (!v) return 'BLOCK';               // cold cache -> modal resolves it
   return v.state === 'CLEAN' || v.state === 'ADVISORY' ? 'PASS' : 'BLOCK';
@@ -13,13 +26,20 @@ export type GateDeps = {
   isSendIntent: (e: Event, path: EventTarget[]) => boolean;
   hashOf: (text: string) => string;          // sync hash lookup memoized by the scanner
   approvedHash: () => string | null;
+  /** Consumes (burns) the active approval token if it matches the given hash.
+   *  Called by the gate when a prompt passes via an approval — single-use guarantee. */
+  consumeApproval: (hash: string) => void;
   /**
    * When true, block even on a CLEAN prompt. Held files were intercepted at
    * attach and the provider never received them — Send must hand them off
    * (reattach) first. Covers scanning, review, AND clean-checked files.
    */
   hasHeldFiles?: () => boolean;
+  /** Optional evaluator to block prompts with policy or ethics violations. */
+  shouldBlock?: (text: string) => boolean;
   onBlocked: (text: string) => void;
+  /** Called when this gate permits the provider's send event to continue. */
+  onAllowed?: (text: string) => void;
 };
 
 /** True when the event originated inside our shadow UI (modal, hints popover). */
@@ -66,12 +86,22 @@ export function installGate(deps: GateDeps): void {
       deps.onBlocked(text);
       return;
     }
-    const decision = decideGate({ hash: deps.hashOf(text), cache: deps.cache, approvedHash: deps.approvedHash() });
+    const hash = deps.hashOf(text);
+    const decision = decideGate({
+      hash,
+      cache: deps.cache,
+      approvedHash: deps.approvedHash(),
+      text,
+      shouldBlock: deps.shouldBlock,
+      consumeApproval: () => deps.consumeApproval(hash),
+    });
     if (decision === 'BLOCK') {
       e.stopImmediatePropagation();
       e.preventDefault();
       deps.onBlocked(text);
+      return;
     }
+    deps.onAllowed?.(text);
   };
   window.addEventListener('keydown', handler, { capture: true });
   window.addEventListener('click', handler, { capture: true });

@@ -6,7 +6,7 @@ export default defineConfig({
     name: 'Vanguard (Slice 1)',
     description: 'On-device prompt-privacy gate for ChatGPT and Claude. Team test build.',
     version: '0.1.0',
-    permissions: ['storage', 'offscreen'],
+    permissions: ['storage', 'offscreen', 'alarms', 'notifications'],
     host_permissions: [
       // --- AI tool registry. Keep in step with code/policy/app/seed.py. ---
       // A curated, finite list is the answer to "why not <all_urls>?": AI

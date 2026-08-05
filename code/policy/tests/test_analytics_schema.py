@@ -12,3 +12,4 @@ def test_name_columns_exist():
         ).fetchall()}
     assert "name" in cols("employees")
     assert "name" in cols("enroll_tokens")
+    assert "risk_level" in cols("usage_events")

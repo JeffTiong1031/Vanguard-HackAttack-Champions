@@ -30,13 +30,14 @@ def _employee(conn, pseudo_id: str):
 async def create_appeal(body: AppealCreate) -> dict[str, str]:
     conn = get_conn()
     emp = _employee(conn, body.pseudo_id)
+    scope_fp = body.scope_fingerprint or body.prompt_hash
 
     # Pre-Screen 1: An already approved scope fingerprint requires no manual review.
-    if body.scope_fingerprint:
+    if scope_fp:
         approved_scope = conn.execute(
             "SELECT id FROM decision_appeals"
             " WHERE employee_id = %s AND scope_fingerprint = %s AND status = 'approved'",
-            (emp["id"], body.scope_fingerprint),
+            (emp["id"], scope_fp),
         ).fetchone()
         if approved_scope:
             return {
@@ -47,11 +48,11 @@ async def create_appeal(body: AppealCreate) -> dict[str, str]:
             }
 
     # Pre-Screen 2: Deduplicate pending appeals for identical scope/category.
-    if body.scope_fingerprint:
+    if scope_fp:
         existing = conn.execute(
             "SELECT id FROM decision_appeals"
             " WHERE employee_id = %s AND scope_fingerprint = %s AND status = 'pending'",
-            (emp["id"], body.scope_fingerprint),
+            (emp["id"], scope_fp),
         ).fetchone()
     else:
         existing = conn.execute(
@@ -75,8 +76,17 @@ async def create_appeal(body: AppealCreate) -> dict[str, str]:
         "  disclosed_text, scope_fingerprint, status, created_at)"
         " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s)",
         (appeal_id, emp["org_id"], emp["id"], body.decision_type, body.category,
-         body.reason, body.disclosed_text, body.scope_fingerprint, now_iso()),
+         body.reason, body.disclosed_text, scope_fp, now_iso()),
     )
+
+    from app.routes.notifications import create_notification
+    cat_name = body.category.replace("_", " ").title() if body.category else "Ethics Review"
+    title = f"Prompt Review Submitted: {cat_name}"
+    msg_text = f"Your review request for {cat_name} has been submitted and is in review with your manager."
+    if body.reason:
+        msg_text += f" Reason: {body.reason}"
+    create_notification(conn, emp["org_id"], emp["id"], "appeal_submitted", title, msg_text)
+
     conn.commit()
     return {
         "id": appeal_id,

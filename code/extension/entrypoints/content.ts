@@ -1,7 +1,7 @@
 import { pickAdapter } from '../src/adapters/registry';
 import { recordFindings, recordIgnore } from '../src/audit/audit';
 import { capabilitiesFor, getMode, type ModeCapabilities } from '../src/mode/mode';
-import type { GovernanceEvent } from '../src/policy/types';
+import type { GovernanceEvent, RiskLevel } from '../src/policy/types';
 import type { PolicyRequest, AllowanceResponse } from '../src/policy/messages';
 
 /** Fire-and-forget. A governance event must never delay the gate, and a policy
@@ -70,6 +70,12 @@ export default defineContentScript({
     const numbering = new SessionNumbering();
     const hashes = new Map<string, string>();
     const files = new FileStore();
+    const promptRisks = new Map<string, RiskLevel>();
+    let lastRecordedSend: { hash: string; at: number } | null = null;
+    // Track appeal hashes that have already been granted and consumed in this session.
+    // Prevents the employee from getting unlimited re-grants from the permanent
+    // approved-scopes list after the one-time pass has been used.
+    const usedAppealPasses = new Set<string>();
 
     // Voice can move content to the provider without passing through the typed
     // prompt flow. Hold the provider click while the anchored warning dropdown
@@ -117,7 +123,14 @@ export default defineContentScript({
         || adapter.isSendControl(path),
       hashOf: (text) => hashes.get(text) ?? COLD_HASH,
       approvedHash: () => approvals.currentHash(),
+      consumeApproval: (hash) => {
+        approvals.consumeIfMatch(hash);
+        // Mark this hash as used so the same prompt cannot re-grant itself
+        // from the backend's permanent approved-scopes list.
+        usedAppealPasses.add(hash);
+      },
       hasHeldFiles: () => files.hasHeld(),
+      shouldBlock: (text) => caps.ethics && checkEthics(text) !== null,
       onBlocked: async (text) => {
         if (cache.getSync(hashes.get(text) ?? '') == null) await scan(text);
         const verdict = cache.getSync(hashes.get(text) ?? '');
@@ -129,11 +142,15 @@ export default defineContentScript({
         const ethics = caps.ethics ? checkEthics(text) : null;
         if (ethics) {
           const promptHash = hashes.get(text) ?? await sha256Hex(text);
+          promptRisks.set(promptHash, 'high');
           // One-time pass: an overturned appeal for THIS exact prompt lets it
-          // through once. Checked here so the block is bypassed before the modal.
-          const passGranted = await chrome.runtime.sendMessage({ kind: 'appeal-allowance-check', promptHash })
-            .then((r: AllowanceResponse) => (r?.ok ? r.granted : false))
-            .catch(() => false);
+          // through once. Skip the backend check if the pass was already used
+          // this session (approved-scopes is permanent; we enforce single-use locally).
+          const passGranted = usedAppealPasses.has(promptHash)
+            ? false
+            : await chrome.runtime.sendMessage({ kind: 'appeal-allowance-check', promptHash })
+                .then((r: AllowanceResponse) => (r?.ok ? r.granted : false))
+                .catch(() => false);
 
           if (!passGranted) {
             emitGovernance({
@@ -147,6 +164,14 @@ export default defineContentScript({
               category: ethics.category,
               orgName: 'your organisation',
               promptText: text,
+              fetchReviews: async () => {
+                try {
+                  const res = await chrome.runtime.sendMessage({ kind: 'appeals-get' });
+                  return res?.ok ? res.appeals : [];
+                } catch {
+                  return [];
+                }
+              },
               onEdit: () => (blockedComposer ?? adapter.getComposer())?.focus(),
               onRequestReview: (reason, disclosedText) => {
                 void chrome.runtime.sendMessage({
@@ -263,6 +288,25 @@ export default defineContentScript({
             files.clear();
             clearChips();
           },
+        });
+      },
+      onAllowed: (text) => {
+        if (!caps.reporting) return;
+        const hash = hashes.get(text) ?? COLD_HASH;
+        // A click can be followed by the form's submit event. They represent
+        // one provider send, so do not create two dashboard rows.
+        const now = Date.now();
+        if (lastRecordedSend?.hash === hash && now - lastRecordedSend.at < 1_000) return;
+        lastRecordedSend = { hash, at: now };
+        const verdict = cache.getSync(hash);
+        const classes = [...new Set(verdict?.findings.map((finding) => finding.cls) ?? [])];
+        const ethics = caps.ethics ? checkEthics(text) : null;
+        emitGovernance({
+          host: location.hostname,
+          type: 'prompt_sent',
+          category: ethics?.category ?? (classes.length > 0 ? classes.join(', ') : undefined),
+          risk_level: promptRisks.get(hash) ?? (ethics ? 'high' : verdict?.state === 'DIRTY' ? 'medium' : 'low'),
+          ts: new Date().toISOString(),
         });
       },
     });

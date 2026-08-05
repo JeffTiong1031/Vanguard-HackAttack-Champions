@@ -65,3 +65,23 @@ def test_department_scope_isolates():
     a = analytics_summary(get_conn(), org_id, 7, da)
     assert a["totals"]["events"] == 1
     assert all(d["department"] == "Alpha" for d in a["top_departments"])
+
+
+def test_sent_prompts_are_grouped_by_their_recorded_risk_level():
+    org_id, _ = seed_company(get_conn(), "PromptCo " + uuid.uuid4().hex[:6])
+    dept_id, _ = create_department(get_conn(), org_id, "Engineering")
+    e = _emp_id(org_id, dept_id)
+    for level in ("low", "medium", "high"):
+        get_conn().execute(
+            "INSERT INTO usage_events"
+            " (id, org_id, employee_id, host, type, category, finding_hash, risk_level, ts)"
+            " VALUES (%s, %s, %s, 'chatgpt.com', 'prompt_sent', NULL, NULL, %s, %s)",
+            (uuid.uuid4().hex, org_id, e, level, _iso(0)),
+        )
+    get_conn().commit()
+
+    summary = analytics_summary(get_conn(), org_id, 7, None)
+    assert {row["severity"]: row["count"] for row in summary["alerts_by_severity"]} == {
+        "low": 1, "medium": 1, "high": 1,
+    }
+    assert sum(row["risk"] for row in summary["risk_timeline"]) == 8

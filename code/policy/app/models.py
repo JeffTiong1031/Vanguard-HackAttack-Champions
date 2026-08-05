@@ -19,7 +19,9 @@ class ToolPolicy(BaseModel):
     llm_id: str
     host: str
     display_name: str
-    status: Literal["approved", "blocked"]
+    status: Literal["approved", "blocked", "temporary", "trial", "conditional"]
+    access_mode: Literal["standard", "strict_redaction", "no_file_uploads"] = "standard"
+    expires_at: Optional[str] = None
 
 
 class CategoryPolicy(BaseModel):
@@ -62,12 +64,15 @@ DecisionReason = Literal[
 
 
 class BinaryDecision(BaseModel):
-    """A durable access decision. There is no provisional third outcome."""
+    """An access decision supporting permanent, temporary, trial, or conditional states."""
 
     model_config = ConfigDict(extra="forbid")
-    decision: Literal["approved", "blocked"]
+    decision: Literal["approved", "blocked", "temporary", "trial", "conditional"]
     reason_code: Optional[DecisionReason] = None
     note: Optional[str] = Field(default=None, max_length=500)
+    access_mode: Literal["standard", "strict_redaction", "no_file_uploads"] = "standard"
+    duration_days: Optional[int] = Field(default=None, ge=1, le=90)
+    expires_at: Optional[str] = None
 
     @model_validator(mode="after")
     def blocked_decisions_explain_the_next_step(self):
@@ -85,10 +90,17 @@ class UsageEvent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     host: str
-    type: Literal["visit_unapproved", "warn_shown", "request_sent", "ethics_block", "pii_block"]
+    type: Literal["visit_unapproved", "warn_shown", "request_sent", "ethics_block", "pii_block", "prompt_sent"]
     category: Optional[str] = None
     finding_hash: Optional[str] = None
+    risk_level: Optional[Literal["low", "medium", "high"]] = None
     ts: str
+
+    @model_validator(mode="after")
+    def prompt_sends_have_a_risk_level(self):
+        if self.type == "prompt_sent" and self.risk_level is None:
+            raise ValueError("prompt_sent events require risk_level")
+        return self
 
     @field_validator("finding_hash")
     @classmethod
@@ -133,20 +145,22 @@ class AppealCreate(BaseModel):
     disclosed_text: Optional[str] = Field(default=None, max_length=4000)
     # Defines the exact, persistent approval scope without carrying prompt text.
     scope_fingerprint: Optional[str] = Field(default=None, min_length=64, max_length=64)
+    prompt_hash: Optional[str] = Field(default=None, min_length=64, max_length=64)
 
-    @field_validator("scope_fingerprint")
+    @field_validator("scope_fingerprint", "prompt_hash")
     @classmethod
     def _scope_is_hex64(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return value
-        if any(c not in "0123456789abcdef" for c in value.lower()):
-            raise ValueError("scope_fingerprint must be a 64-character hex digest")
+        if len(value) != 64 or any(c not in "0123456789abcdef" for c in value.lower()):
+            raise ValueError("must be a 64-character hex digest")
         return value.lower()
 
     @model_validator(mode="after")
     def ethics_appeals_have_a_fixed_scope(self):
-        if self.decision_type == "ethics" and self.scope_fingerprint is None:
-            raise ValueError("ethics appeals require scope_fingerprint")
+        scope = self.scope_fingerprint or self.prompt_hash
+        if self.decision_type == "ethics" and scope is None:
+            raise ValueError("ethics appeals require scope_fingerprint or prompt_hash")
         return self
 
 

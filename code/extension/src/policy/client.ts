@@ -86,3 +86,18 @@ export async function sendAccessRequest(llmId: string, reason: string): Promise<
   });
   if (!response.ok) throw new Error(`Request failed (${response.status}).`);
 }
+
+import type { NotificationRow } from './messages';
+
+export async function fetchNotifications(): Promise<NotificationRow[]> {
+  const enrolment = await getEnrolment();
+  if (!enrolment) return [];
+  const base = await getPolicyBase();
+  try {
+    const res = await timedFetch(`${base}/v1/notifications?pseudo_id=${encodeURIComponent(enrolment.pseudo_id)}`);
+    if (!res.ok) return [];
+    return (await res.json()) as NotificationRow[];
+  } catch {
+    return [];
+  }
+}
