@@ -55,6 +55,7 @@ function Organisation({ enrolment, setEnrolment, policy, setPolicy }: Organisati
   }
 
   async function leave() {
+    if (!canSwitchToPersonal(enrolment)) return; // belt-and-braces: the button is disabled too
     await clearEnrolment();
     setEnrolment(null);
     setPolicy(null);
@@ -62,6 +63,7 @@ function Organisation({ enrolment, setEnrolment, policy, setPolicy }: Organisati
 
   if (enrolment) {
     const approved = policy?.tools.filter((t) => t.status === 'approved').length ?? 0;
+    const canLeave = canSwitchToPersonal(enrolment);
     return (
       <section>
         <h2 style="font-size:16px">Organisation</h2>
@@ -69,8 +71,17 @@ function Organisation({ enrolment, setEnrolment, policy, setPolicy }: Organisati
           Connected to <strong>{enrolment.org_name}</strong> · {enrolment.department} ·{' '}
           {approved} approved tools · policy v{policy?.version ?? '?'}
         </p>
-        <button onClick={leave} style="padding:6px 12px;border:1px solid #cbd5e1;
-                border-radius:6px;background:#fff;cursor:pointer">Disconnect</button>
+        <button
+          onClick={leave}
+          disabled={!canLeave}
+          style={`padding:6px 12px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;
+                  cursor:${canLeave ? 'pointer' : 'not-allowed'};opacity:${canLeave ? '1' : '0.6'}`}
+        >Disconnect</button>
+        <p style="color:#94a3b8;font-size:12px;margin-top:6px">
+          {canLeave
+            ? 'Disconnecting stops all reporting to this organisation.'
+            : 'Ask your admin to revoke your enrolment first. (You can still remove Vanguard from Chrome.)'}
+        </p>
       </section>
     );
   }
@@ -212,7 +223,7 @@ function PersonalPanel({ onSwitch }: { onSwitch: () => void }) {
   );
 }
 
-function Options() {
+export function Options() {
   const [mode, setModeState] = useState<Mode | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [enrolment, setEnrolment] = useState<Enrolment | null>(null);
