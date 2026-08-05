@@ -17,8 +17,12 @@ check detects it.
 | Field | Means |
 |---|---|
 | `composerFound: false` | rung 1 fails. Nothing else is meaningful |
+| `composerKind: "last-focused"` | the element the operator actually focused before switching to DevTools — the reliable case |
+| `composerKind` is `"active"`, `"contenteditable-query"`, or `"textarea-query"` | 🔴 **treat the reading as suspect.** No remembered focus was available, so the probe fell back to `document.activeElement` (likely DevTools itself) or queried the first matching element on the page — which can be a rename field, a sidebar editor, or a message-edit overlay, not the composer. **Re-run: click into the actual composer, then switch to DevTools and invoke `__vgU31()` without clicking anything else on the page in between** |
+| `composerDescriptor` | tag / id / first CSS class / rounded width×height (px) of the measured element. Use it to sanity-check `composerKind` — a real composer is normally the widest, tallest text-entry element on the page; a 20×20px box is not it |
 | `execCommandReturned: false` | the browser refused the insert outright |
-| `matches: true` | text landed AND survived two frames |
+| `stillConnected: false` | 🔴 the measured node was removed from the DOM during the two-frame wait — the framework replaced rather than mutated it. `readBack` and `matches` were read from a detached node and may be misleading |
+| `matches: true` | text landed AND survived two frames. Only trust this if `stillConnected: true` |
 | `matches: false` with `execCommandReturned: true` | 🔴 **the interesting case** — the editor reverted it. This is what read-back exists to catch |
 
 ⚠️ `matches: true` proves the text is in the DOM. It does **not** prove the
