@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import mimetypes
 
@@ -80,10 +81,16 @@ async def _validation_error(request: Request, exc: RequestValidationError) -> JS
 
 @app.on_event("startup")
 async def _startup() -> None:
-    """Apply any outstanding incremental schema migrations on boot."""
-    try:
+    """Apply incremental schema migrations without blocking port bind forever."""
+
+    def _run_migrations() -> None:
         migrate_schema(get_conn())
         log.info("schema migrations applied")
+
+    try:
+        await asyncio.wait_for(asyncio.to_thread(_run_migrations), timeout=45.0)
+    except TimeoutError:
+        log.warning("schema migration timed out after 45s — continuing startup")
     except Exception as exc:
         log.warning("schema migration skipped: %s", exc)
 
