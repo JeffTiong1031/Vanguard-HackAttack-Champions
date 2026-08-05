@@ -10,26 +10,38 @@ import { getMode, setMode, optionsView, type Mode } from '../../src/mode/mode';
 import { getPolicyBase, setPolicyBase } from '../../src/policy/config';
 import type { PolicyRequest, PolicyResponse, AppealsResponse } from '../../src/policy/messages';
 import { clearEnrolment } from '../../src/policy/store';
+import { REVOKED_MESSAGE, takeRevokedNotice } from '../../src/policy/revoked';
 import type { Enrolment, Policy } from '../../src/policy/types';
 import type { AppealRow } from '../../src/policy/appeals';
 import { SensitivityPanel } from '../../src/ui/sensitivity-panel';
+
+export const TOKEN_RESPONSIBILITY =
+  'Keep this code private — activity recorded under it is attributed to you.';
+
+/** Enterprise is a commitment, not a toggle: leaving requires the admin to
+ *  revoke. Honest limit — the extension can still be removed in Chrome. */
+export function canSwitchToPersonal(enrolment: Enrolment | null): boolean {
+  return enrolment === null;
+}
 
 function ask(msg: PolicyRequest): Promise<PolicyResponse> {
   return chrome.runtime.sendMessage(msg) as Promise<PolicyResponse>;
 }
 
-function Organisation() {
-  const [enrolment, setEnrolment] = useState<Enrolment | null>(null);
-  const [policy, setPolicy] = useState<Policy | null>(null);
+type OrganisationProps = {
+  enrolment: Enrolment | null;
+  setEnrolment: (e: Enrolment | null) => void;
+  policy: Policy | null;
+  setPolicy: (p: Policy | null) => void;
+};
+
+function Organisation({ enrolment, setEnrolment, policy, setPolicy }: OrganisationProps) {
   const [token, setToken] = useState('');
   const [base, setBase] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
     void getPolicyBase().then(setBase);
-    void ask({ kind: 'policy-get' }).then((r) => {
-      if (r.ok) { setEnrolment(r.enrolment); setPolicy(r.policy); }
-    });
   }, []);
 
   async function join() {
@@ -77,6 +89,7 @@ function Organisation() {
         placeholder="Policy service address"
         style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;margin-bottom:8px"
       />
+      <p style="color:#64748b;font-size:12px;margin:0 0 4px">{TOKEN_RESPONSIBILITY}</p>
       <input
         value={token}
         onInput={(e) => setToken((e.target as HTMLInputElement).value)}
@@ -202,34 +215,61 @@ function PersonalPanel({ onSwitch }: { onSwitch: () => void }) {
 function Options() {
   const [mode, setModeState] = useState<Mode | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [enrolment, setEnrolment] = useState<Enrolment | null>(null);
+  const [policy, setPolicy] = useState<Policy | null>(null);
+  const [revokedNotice, setRevokedNotice] = useState(false);
 
   useEffect(() => { void getMode().then((m) => { setModeState(m); setLoaded(true); }); }, []);
+  useEffect(() => {
+    void ask({ kind: 'policy-get' }).then((r) => {
+      if (r.ok) { setEnrolment(r.enrolment); setPolicy(r.policy); }
+    });
+  }, []);
+  useEffect(() => { void takeRevokedNotice().then(setRevokedNotice); }, []);
 
   async function choose(m: Mode) { await setMode(m); setModeState(m); }
   async function toPersonal() {
+    if (!canSwitchToPersonal(enrolment)) return; // belt-and-braces: the button is disabled too
     await clearEnrolment();            // disconnect + stop reporting
     await setMode('personal');
     setModeState('personal');
   }
 
   const view = loaded ? optionsView(mode) : null;
+  const canLeave = canSwitchToPersonal(enrolment);
 
   return (
     <div style="font:14px/1.5 system-ui, sans-serif; max-width:560px">
       <h1 style="font-size:18px">Vanguard</h1>
+      {revokedNotice && (
+        <p style="background:#fef3c7;color:#92400e;padding:10px 12px;border-radius:6px;margin-bottom:16px">
+          {REVOKED_MESSAGE}
+        </p>
+      )}
       {view === null && <p style="color:#64748b">Loading…</p>}
       {view === 'picker' && <ModePicker onChoose={choose} />}
       {view === 'personal' && <PersonalPanel onSwitch={() => void choose('enterprise')} />}
       {view === 'enterprise' && (
         <>
-          <Organisation />
+          <Organisation
+            enrolment={enrolment}
+            setEnrolment={setEnrolment}
+            policy={policy}
+            setPolicy={setPolicy}
+          />
           <FileService />
           <MyReviews />
           <section style="margin-top:32px;border-top:1px solid #e2e8f0;padding-top:16px">
-            <button onClick={() => void toPersonal()} style="padding:6px 12px;border:1px solid #cbd5e1;
-                    border-radius:6px;background:#fff;cursor:pointer">Switch to Personal</button>
+            <button
+              onClick={() => void toPersonal()}
+              disabled={!canLeave}
+              style={`padding:6px 12px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;
+                      cursor:${canLeave ? 'pointer' : 'not-allowed'};opacity:${canLeave ? '1' : '0.6'}`}
+            >Switch to Personal</button>
             <p style="color:#94a3b8;font-size:12px;margin-top:6px">
-              Switching disconnects from your organisation and stops all reporting.
+              {canLeave
+                ? 'Switching disconnects from your organisation and stops all reporting.'
+                : 'Ask your admin to revoke your enrolment first. (You can still remove Vanguard from Chrome.)'}
             </p>
           </section>
         </>
@@ -238,10 +278,16 @@ function Options() {
   );
 }
 
-render(
-  <>
-    <Options />
-    <SensitivityPanel />
-  </>,
-  document.getElementById('root')!,
-);
+// Guarded rather than `!`-asserted: importing this module's named exports
+// (tests, other entrypoints) must not crash just because there is no #root
+// in that environment's document.
+const root = document.getElementById('root');
+if (root) {
+  render(
+    <>
+      <Options />
+      <SensitivityPanel />
+    </>,
+    root,
+  );
+}
