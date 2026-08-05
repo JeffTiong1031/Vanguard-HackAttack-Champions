@@ -1,7 +1,8 @@
 from fastapi.testclient import TestClient
 
 from app.db import bump_policy_version
-from app.main import app, get_conn
+from app.deps import get_conn
+from app.main import app
 from app.seed import seed_company
 
 client = TestClient(app)

@@ -2,7 +2,8 @@
 
 from fastapi.testclient import TestClient
 
-from app.main import app, get_conn
+from app.deps import get_conn
+from app.main import app
 from app.seed import seed_company, create_department, mint_employee_token
 from app.security import now_iso
 
