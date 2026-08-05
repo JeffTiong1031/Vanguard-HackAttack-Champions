@@ -15,6 +15,7 @@ import {
   LayersIcon, ShieldIcon, InboxIcon, BarIcon, KeyIcon, GavelIcon,
   PanelLeftIcon, ChevronRightIcon
 } from './icons';
+import { revealVisibleTarget } from './reveal';
 import './style.css';
 
 const SESSION_KEY = 'vg_admin_session';
@@ -80,6 +81,7 @@ function useScrollReveal(activeId: string) {
           htmlEl.style.transitionDelay = `${Math.min(idx * 0.02, 0.08)}s`;
         }
         observer.observe(htmlEl);
+        revealVisibleTarget(htmlEl, window.innerHeight);
       });
     };
 
