@@ -11,6 +11,10 @@ has been updated accordingly.
 import psycopg2
 import psycopg2.extras
 
+# Applied via libpq `options=` so they survive Supabase transaction-mode pooler
+# (a post-connect SET + COMMIT is discarded when the backend is returned).
+_CONNECT_OPTIONS = "-c statement_timeout=15s -c lock_timeout=5s"
+
 
 class _Connection:
     """Thin sqlite3-compatible wrapper around a psycopg2 connection.
@@ -28,12 +32,13 @@ class _Connection:
 
     def __init__(self, dsn: str) -> None:
         # connect_timeout: fail fast on bad DNS/credentials (Render health check).
-        # statement_timeout: migrations must not block port bind indefinitely.
-        self._conn = psycopg2.connect(dsn, connect_timeout=15)
+        # options=: statement/lock timeouts on every backend checkout (pooler-safe).
+        self._conn = psycopg2.connect(
+            dsn,
+            connect_timeout=15,
+            options=_CONNECT_OPTIONS,
+        )
         self._conn.autocommit = False
-        with self._conn.cursor() as cur:
-            cur.execute("SET statement_timeout = '30s'")
-        self._conn.commit()
 
     def execute(self, sql: str, params=()) -> psycopg2.extras.RealDictCursor:
         if self._conn.get_transaction_status() == psycopg2.extensions.TRANSACTION_STATUS_INERROR:
@@ -238,53 +243,183 @@ def init_schema(conn: "_Connection") -> None:
 # ---------------------------------------------------------------------------
 # Incremental migrations (idempotent — safe to run on every startup)
 # ---------------------------------------------------------------------------
-_MIGRATIONS = [
-    "ALTER TABLE org_llm_policy ADD COLUMN IF NOT EXISTS access_mode TEXT NOT NULL DEFAULT 'standard';",
-    "ALTER TABLE org_llm_policy ADD COLUMN IF NOT EXISTS expires_at TEXT;",
-    "ALTER TABLE dept_llm_policy ADD COLUMN IF NOT EXISTS access_mode TEXT NOT NULL DEFAULT 'standard';",
-    "ALTER TABLE dept_llm_policy ADD COLUMN IF NOT EXISTS expires_at TEXT;",
-    "ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS access_mode TEXT DEFAULT 'standard';",
-    "ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS expires_at TEXT;",
-    "ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS admin_note TEXT;",
-    "ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS reason_code TEXT;",
-    "ALTER TABLE decision_appeals ADD COLUMN IF NOT EXISTS scope_fingerprint TEXT;",
-    "ALTER TABLE decision_appeals ADD COLUMN IF NOT EXISTS reason_code TEXT;",
-    "ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS risk_level TEXT;",
-    """CREATE TABLE IF NOT EXISTS notifications (
-        id           TEXT PRIMARY KEY,
-        org_id       TEXT NOT NULL REFERENCES orgs(id),
-        employee_id  TEXT NOT NULL REFERENCES employees(id),
-        kind         TEXT NOT NULL,
-        title        TEXT NOT NULL,
-        message      TEXT NOT NULL,
-        status       TEXT NOT NULL DEFAULT 'unread',
-        created_at   TEXT NOT NULL
-    );""",
-    # Pooler-safe status checks (DO $$ blocks hang on Supabase transaction mode).
-    "ALTER TABLE org_llm_policy DROP CONSTRAINT IF EXISTS org_llm_policy_status_check;",
-    "ALTER TABLE org_llm_policy ADD CONSTRAINT org_llm_policy_status_check CHECK (status IN ('approved', 'blocked', 'temporary', 'trial', 'conditional'));",
-    "ALTER TABLE dept_llm_policy DROP CONSTRAINT IF EXISTS dept_llm_policy_status_check;",
-    "ALTER TABLE dept_llm_policy ADD CONSTRAINT dept_llm_policy_status_check CHECK (status IN ('approved', 'blocked', 'temporary', 'trial', 'conditional'));",
-    "ALTER TABLE access_requests DROP CONSTRAINT IF EXISTS access_requests_status_check;",
-    "ALTER TABLE access_requests ADD CONSTRAINT access_requests_status_check CHECK (status IN ('pending', 'approved', 'blocked', 'temporary', 'trial', 'conditional'));",
-    "ALTER TABLE decision_appeals DROP CONSTRAINT IF EXISTS decision_appeals_status_check;",
-    "ALTER TABLE decision_appeals ADD CONSTRAINT decision_appeals_status_check CHECK (status IN ('pending', 'approved', 'blocked', 'temporary', 'trial', 'conditional'));",
+# (table, column, ALTER… ADD COLUMN IF NOT EXISTS …)
+_COLUMN_ADDS: list[tuple[str, str, str]] = [
+    ("org_llm_policy", "access_mode",
+     "ALTER TABLE org_llm_policy ADD COLUMN IF NOT EXISTS access_mode TEXT NOT NULL DEFAULT 'standard'"),
+    ("org_llm_policy", "expires_at",
+     "ALTER TABLE org_llm_policy ADD COLUMN IF NOT EXISTS expires_at TEXT"),
+    ("dept_llm_policy", "access_mode",
+     "ALTER TABLE dept_llm_policy ADD COLUMN IF NOT EXISTS access_mode TEXT NOT NULL DEFAULT 'standard'"),
+    ("dept_llm_policy", "expires_at",
+     "ALTER TABLE dept_llm_policy ADD COLUMN IF NOT EXISTS expires_at TEXT"),
+    ("access_requests", "access_mode",
+     "ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS access_mode TEXT DEFAULT 'standard'"),
+    ("access_requests", "expires_at",
+     "ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS expires_at TEXT"),
+    ("access_requests", "admin_note",
+     "ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS admin_note TEXT"),
+    ("access_requests", "reason_code",
+     "ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS reason_code TEXT"),
+    ("decision_appeals", "scope_fingerprint",
+     "ALTER TABLE decision_appeals ADD COLUMN IF NOT EXISTS scope_fingerprint TEXT"),
+    ("decision_appeals", "reason_code",
+     "ALTER TABLE decision_appeals ADD COLUMN IF NOT EXISTS reason_code TEXT"),
+    ("usage_events", "risk_level",
+     "ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS risk_level TEXT"),
 ]
+
+_NOTIFICATIONS_DDL = """
+CREATE TABLE IF NOT EXISTS notifications (
+    id           TEXT PRIMARY KEY,
+    org_id       TEXT NOT NULL REFERENCES orgs(id),
+    employee_id  TEXT NOT NULL REFERENCES employees(id),
+    kind         TEXT NOT NULL,
+    title        TEXT NOT NULL,
+    message      TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'unread',
+    created_at   TEXT NOT NULL
+);
+"""
+
+# (constraint_name, table, CHECK body). Skip DROP/ADD when already current —
+# re-running DDL every boot is what hung Render on the Supabase pooler.
+_STATUS_CHECK_MIGRATIONS = [
+    (
+        "org_llm_policy_status_check",
+        "org_llm_policy",
+        "status IN ('approved', 'blocked', 'temporary', 'trial', 'conditional')",
+    ),
+    (
+        "dept_llm_policy_status_check",
+        "dept_llm_policy",
+        "status IN ('approved', 'blocked', 'temporary', 'trial', 'conditional')",
+    ),
+    (
+        "access_requests_status_check",
+        "access_requests",
+        "status IN ('pending', 'approved', 'blocked', 'temporary', 'trial', 'conditional')",
+    ),
+    (
+        "decision_appeals_status_check",
+        "decision_appeals",
+        "status IN ('pending', 'approved', 'blocked', 'temporary', 'trial', 'conditional')",
+    ),
+]
+
+
+def status_constraint_is_current(conn: "_Connection", name: str) -> bool:
+    """True when the named CHECK already allows temporary/trial/conditional."""
+    row = conn.execute(
+        "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = %s",
+        (name,),
+    ).fetchone()
+    if row is None:
+        return False
+    definition = row["def"] or ""
+    return "temporary" in definition and "conditional" in definition
+
+
+def _existing_columns(conn: "_Connection") -> set[tuple[str, str]]:
+    """One round-trip: which (table, column) pairs already exist in public."""
+    tables = sorted({t for t, _, _ in _COLUMN_ADDS})
+    rows = conn.execute(
+        "SELECT table_name, column_name FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = ANY(%s)",
+        (tables,),
+    ).fetchall()
+    return {(r["table_name"], r["column_name"]) for r in rows}
+
+
+def _table_exists(conn: "_Connection", name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 AS ok FROM information_schema.tables "
+        "WHERE table_schema = 'public' AND table_name = %s",
+        (name,),
+    ).fetchone()
+    return row is not None
+
+
+def _current_status_constraints(conn: "_Connection") -> set[str]:
+    """Names of status CHECKs that already allow temporary + conditional."""
+    names = [n for n, _, _ in _STATUS_CHECK_MIGRATIONS]
+    rows = conn.execute(
+        "SELECT conname, pg_get_constraintdef(oid) AS def "
+        "FROM pg_constraint WHERE conname = ANY(%s)",
+        (names,),
+    ).fetchall()
+    out: set[str] = set()
+    for row in rows:
+        definition = row["def"] or ""
+        if "temporary" in definition and "conditional" in definition:
+            out.add(row["conname"])
+    return out
 
 
 def migrate_schema(conn: "_Connection") -> None:
     """Apply any outstanding incremental schema changes.
 
-    Each statement is idempotent (IF NOT EXISTS / IF EXISTS guards).
-    Run AFTER init_schema on every startup so new deployments catch up.
+    Prefers catalog lookups over blind DDL: on a warm schema this is a few
+    SELECTs. Re-running ALTER/ADD CONSTRAINT every boot hung Render behind the
+    Supabase transaction pooler.
     """
-    for stmt in _MIGRATIONS:
+    try:
+        existing = _existing_columns(conn)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        existing = set()
+
+    for table, column, stmt in _COLUMN_ADDS:
+        if (table, column) in existing:
+            continue
         try:
             conn.execute(stmt)
             conn.commit()
         except Exception:
-            # Drop constraint / alter table failure can happen if already matching schema.
             conn.rollback()
+
+    try:
+        if not _table_exists(conn, "notifications"):
+            conn.execute(_NOTIFICATIONS_DDL)
+            conn.commit()
+        else:
+            conn.commit()
+    except Exception:
+        conn.rollback()
+
+    try:
+        current = _current_status_constraints(conn)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        current = set()
+
+    for name, table, check_expr in _STATUS_CHECK_MIGRATIONS:
+        if name in current:
+            continue
+        try:
+            conn.execute(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {name}")
+            conn.commit()
+            conn.execute(
+                f"ALTER TABLE {table} ADD CONSTRAINT {name} CHECK ({check_expr})"
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+
+def migrate_on_dedicated_connection(dsn: str) -> None:
+    """Run migrations on a private connection, then close it.
+
+    Must not use the request-path singleton: a timed-out migrate thread racing
+    handlers on one psycopg2 connection yields InFailedSqlTransaction.
+    """
+    conn = connect(dsn)
+    try:
+        migrate_schema(conn)
+    finally:
+        conn.close()
 
 
 def bump_policy_version(conn: "_Connection", org_id: str) -> int:
