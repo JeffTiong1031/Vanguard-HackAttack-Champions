@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import mimetypes
+import os
 
 # Fix Windows registry MIME type issue where .js files default to text/plain
 mimetypes.add_type("text/javascript", ".js")
@@ -12,8 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.requests import Request
 
-from app.db import migrate_schema
-from app.deps import get_conn
+from app.db import migrate_on_dedicated_connection
 
 # No APM, no body capture. Same posture as code/backend/app/main.py, and this
 # module is where a reviewer looks to confirm it.
@@ -81,18 +81,23 @@ async def _validation_error(request: Request, exc: RequestValidationError) -> JS
 
 @app.on_event("startup")
 async def _startup() -> None:
-    """Apply incremental schema migrations without blocking port bind forever."""
+    """Kick off schema migrations without blocking port bind.
+
+    Render health-checks the open port. Awaiting migrate (even with a timeout)
+    delayed bind by up to 45s and left a background thread racing the request
+    singleton — that is the InFailedSqlTransaction / health-flap failure mode.
+    init_schema already created the current shape at import; this only upgrades
+    older DBs, on a dedicated connection, after the server is listening.
+    """
 
     def _run_migrations() -> None:
-        migrate_schema(get_conn())
-        log.info("schema migrations applied")
+        try:
+            migrate_on_dedicated_connection(os.environ["DATABASE_URL"])
+            log.info("schema migrations applied")
+        except Exception as exc:
+            log.warning("schema migration skipped: %s", exc)
 
-    try:
-        await asyncio.wait_for(asyncio.to_thread(_run_migrations), timeout=45.0)
-    except TimeoutError:
-        log.warning("schema migration timed out after 45s — continuing startup")
-    except Exception as exc:
-        log.warning("schema migration skipped: %s", exc)
+    asyncio.create_task(asyncio.to_thread(_run_migrations))
 
 
 @app.get("/healthz")
