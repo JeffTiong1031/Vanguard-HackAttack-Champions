@@ -691,8 +691,22 @@ as two in every report.
 |---|---|---|
 | 9.3.1 | Note the `pseudo_id` (Options, or the service-worker console) | Record it |
 | 9.3.2 | `chrome://extensions` → **Remove** the extension → Load unpacked again → set the policy address → enrol with **the same token** | Enrols |
-| 9.3.3 | Compare the `pseudo_id` | 🆕 **Identical to 9.3.1.** A different value is a FAIL |
-| 9.3.4 | Console → **Tokens** screen | 🆕 Still **one** person for that token, not two |
+| 9.3.3 | 🔴 **Compare the `pseudo_id`. THIS IS THE TEST.** | 🆕 **Identical to 9.3.1.** A different value is a FAIL. Same value = one identity survived the reinstall |
+| 9.3.4 | *(Optional, only if 9.3.3 fails and you want to see why.)* Query the database directly | Exactly **one** row. Two rows is the old bug |
+
+> ⚠️ **Do not try to check this on the Tokens screen.** It lists *tokens*, not the people behind
+> them, so it looks identical whether one employee or two exist — there is nothing there to
+> observe. **The matching `pseudo_id` in 9.3.3 is the whole proof.** *(Corrected 2026-08-06 after
+> the founder walked this section and got stuck looking for a count that does not exist.)*
+
+For 9.3.4, from `code/policy`:
+
+```sql
+SELECT id, pseudo_id, enroll_token_id FROM employees WHERE enroll_token_id = '<token row id>';
+```
+
+A DB-level unique index (`ux_employees_enroll_token_id`) now makes two rows impossible, so this
+query is a belt-and-braces check rather than the real assertion.
 
 ### 9.4 Use it normally
 
