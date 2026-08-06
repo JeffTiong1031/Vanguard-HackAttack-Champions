@@ -32,6 +32,9 @@ Slice 1 / Slice 2 acceptance record and this document does not replace it.
 - **┬º4** tests the **extension**. **┬º5** tests the **dashboard**. **┬º6** is end-to-end.
 - **┬º7** is the privacy invariants ΓÇö the rows a compliance buyer would actually audit.
 - **┬º8** is the known gaps. **Do not invent a PASS for anything in ┬º8.**
+- **┬º9** is the **Piece 1 token-identity walkthrough** (added 2026-08-06) ΓÇö ~15 min, covers only
+  what changed: the responsibility notice, the mode lock, reinstall-keeps-one-identity, and
+  admin-revoke ΓåÆ drops to Personal. **Read ┬º9.0 first or two correct results will look like bugs.**
 
 **Marking:** leave a box blank until you have observed it. Use `PASS` / `FAIL` / `SKIP` / `BLOCKED`.
 A step you did not run is `SKIP`, not an empty pass.
@@ -639,7 +642,100 @@ This is the detector-prioritization signal. **It ranks our bugs; it does not lab
 
 ---
 
-## 9. Sign-off
+## 9. Piece 1 — token identity and revocation (NEW, 2026-08-06)
+
+**~15 minutes.** This walks only what Piece 1 changed. Everything else in this document is
+unaffected.
+
+### 9.0 Two things that will otherwise look like bugs
+
+Read these first or you will misread a correct result.
+
+1. 🔴 **Revocation is detected by the content script on a chat page, every 5 seconds**
+   (`POLICY_CONFIG.pollMs = 5_000`). **There is no background policy poll.** So if no chat
+   tab is open and you never open the popup or the options page, the extension does not
+   learn it was revoked. Keep a ChatGPT or Claude tab open while you revoke.
+2. 🔴 **The revoked MESSAGE appears in the extension's Options page, not on the chat page.**
+   The chat page silently stops being enterprise-governed. This is by design — we do not
+   inject org messaging into the provider's page — but if you watch only the chat tab you
+   will see "nothing happened" and conclude it failed.
+
+### 9.1 Setup
+
+| | Step | Expected |
+|---|---|---|
+| 9.1.1 | `cd code/policy && .venv/Scripts/python -m uvicorn app.main:app --host 0.0.0.0 --port 8001` | `http://localhost:8001/healthz` → `{"ok":true}` |
+| 9.1.2 | Rebuild only if `src/` changed since the last build: `cd code/extension && npm run build` | `check:dist` exits 0 |
+| 9.1.3 | `chrome://extensions` → Developer mode → **Load unpacked** → `code/extension/dist/chrome-mv3` | Loads with no errors |
+| 9.1.4 | Extension **Options** → set policy address to `http://localhost:8001` | Saved |
+
+### 9.2 Enrol, and check the new copy — **NEW**
+
+| | Step | Expected |
+|---|---|---|
+| 9.2.1 | Open **Options**. Look immediately **above** the token input box | 🆕 The line **"Keep this code private — activity recorded under it is attributed to you."** is visible *before* you type anything |
+| 9.2.2 | Paste an employee token from `DEMO-TOKENS.md` and enrol | Enrols; org name shown |
+| 9.2.3 | Look at **Switch to Personal** and **Disconnect** | 🆕 **BOTH are greyed out / disabled**, with a visible reason: *"Ask your admin to revoke your enrolment first."* plus *"(You can still remove Vanguard from Chrome.)"* |
+| 9.2.4 | Try clicking both anyway | Nothing happens. Still enrolled |
+
+> **9.2.3 is the whole point of the mode lock.** Before Piece 1, **Disconnect** was always
+> enabled and one click un-enrolled you. Gating only *Switch to Personal* would have looked
+> right and done nothing — see [ADR 0034](docs/adr/0034-enrolment-lock-and-the-accepted-lockout.md).
+
+### 9.3 Reinstall does not split the person — **NEW**
+
+The bug this fixes: enrolling twice used to create **two** employees, so one person appeared
+as two in every report.
+
+| | Step | Expected |
+|---|---|---|
+| 9.3.1 | Note the `pseudo_id` (Options, or the service-worker console) | Record it |
+| 9.3.2 | `chrome://extensions` → **Remove** the extension → Load unpacked again → set the policy address → enrol with **the same token** | Enrols |
+| 9.3.3 | Compare the `pseudo_id` | 🆕 **Identical to 9.3.1.** A different value is a FAIL |
+| 9.3.4 | Console → **Tokens** screen | 🆕 Still **one** person for that token, not two |
+
+### 9.4 Use it normally
+
+| | Step | Expected |
+|---|---|---|
+| 9.4.1 | Open `chatgpt.com` (or `claude.ai`), type a prompt containing an NRIC, press Enter | Blocked; modal opens; rewrite; you press Send yourself |
+| 9.4.2 | Leave that tab open | Needed for 9.5 |
+
+### 9.5 Revoke — the demo path
+
+🔴 **Revoke is a Department Admin action.** Company Admin cannot do it.
+
+| | Step | Expected |
+|---|---|---|
+| 9.5.1 | `http://localhost:8001/` → log in as **Department Admin** (role picker + secret) | Console loads |
+| 9.5.2 | **Tokens** screen → find the token you enrolled with → **Revoke** | Row flips to **Revoked**; the *Revoked Tokens* count goes up |
+| 9.5.3 | Switch to the chat tab and **wait ~5 seconds** | Nothing visible on the page — **this is correct**, see §9.0 |
+| 9.5.4 | Open the extension **Options** page | 🆕 **"You're no longer connected to an organisation. Vanguard is now protecting you personally — upgrade for personal plan features."** |
+| 9.5.5 | Look at the mode | 🆕 **Personal.** The org name is gone |
+| 9.5.6 | Close and reopen Options | 🆕 The message does **not** appear again — it is shown once |
+| 9.5.7 | 🔴 **Back on the chat tab: type an NRIC again and press Enter** | 🆕 **The PII gate STILL BLOCKS IT.** This is the most important assertion in §10 — revocation must remove the org connection, never the protection ([ADR 0014](docs/adr/0014-degrade-to-advisory-never-fail-closed.md)) |
+| 9.5.8 | Options → **Switch to Personal** / **Disconnect** | 🆕 Now **enabled** — there is no enrolment left to lock |
+
+### 9.6 Unused tokens expire after 7 days — **NEW**
+
+Not walkable in real time. Verified by `tests/test_enrolment_identity.py`
+(`test_unused_token_expires_after_seven_days`, `test_unused_token_inside_the_window_is_fine`,
+`test_a_used_token_never_expires`). **The rule to remember: expiry applies to *claiming* a
+token, never to keeping it.** A token Alice already used still works when she reinstalls a
+year later; a token nobody ever claimed is dead after 7 days.
+
+### 9.7 Known limits of this walkthrough — do not record these as failures
+
+| # | Limit | Status |
+|---|---|---|
+| 9.7.1 | **A DELETED token never returns 403**, so deleting a row does not deprovision anyone. There is no Delete button in the product; the rule is **revoke, don't delete** | **Accepted**, [ADR 0034](docs/adr/0034-enrolment-lock-and-the-accepted-lockout.md) |
+| 9.7.2 | **Offline stays enrolled until reconnect.** If the policy service is unreachable, both buttons stay locked and the user cannot self-unenrol | **Accepted this phase.** Revisit if real *"stuck while online"* cases appear |
+| 9.7.3 | The `/v1/events` 403 has **no client reaction** — the queue re-tries until the 5s policy tick clears the enrolment, then drops | Small window, by design |
+| 9.7.4 | Employees enrolled **before** this change have no token lineage and **cannot be revoked**. ~948 legacy rows | Deliberate — failing them closed would cut off people no admin acted on |
+
+---
+
+## 10. Sign-off
 
 ### Extension
 
@@ -664,6 +760,9 @@ This is the detector-prioritization signal. **It ranks our bugs; it does not lab
 | ┬º6.3 appeal + one-time pass | | | | |
 | ┬º6.4 mode switch | | | | |
 | ┬º7 privacy invariants | | | | |
+| **┬º9.2** responsibility notice + **both** buttons locked | | | | |
+| **┬º9.3** reinstall ΓåÆ same `pseudo_id`, one employee | | | | |
+| **┬º9.5** revoke ΓåÆ notice, Personal, **PII gate still blocks** | | | | |
 
 **Accepted when:** ┬º3 gates pass ┬╖ ┬º4 and ┬º5 are complete on both surfaces and both roles ┬╖ ┬º6 round
 trips complete ┬╖ **every ┬º7 invariant holds** ┬╖ ┬º8 items are recorded as gaps, not as passes.

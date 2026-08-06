@@ -1,6 +1,18 @@
-# AI tool lists — proposal for founder approval
+# AI tool lists — approved names, hostnames pending verification
 
-**Status: PROPOSAL. Nothing here ships until the founder approves the names.**
+> ## ✅ FOUNDER RULING, 2026-08-06
+>
+> **All proposed names APPROVED** — Groups A, B and C, plus the awareness extras.
+> **`huggingface.co` and `github.com` DROPPED from both starter lists** on the over-warn
+> risk: they are mostly *not* AI tools, so a host-level entry warns far more than it should.
+> They are struck through below rather than deleted, so the reasoning survives if anyone
+> proposes them again.
+>
+> **Still owed before any of this reaches `seed.py` or the manifest:** ⚠️ hostname
+> verification by visiting each surface (§4), and a U31 probe PASS per host for the
+> protection list. **Approval covers the names, not the strings.**
+
+**Status: names approved; not yet implemented. This is Piece 4 work.**
 Written 2026-08-06 at the founder's instruction: *"you propose a starter list, keep the
 current eight first, then add ~12 more you can defend. I'll review/edit before it ships —
 I want to approve the names, not invent the first draft."*
@@ -96,7 +108,7 @@ worth the probe*, not asserting they will pass.
 | `poe.com` | Poe (Quora) | A **multi-model aggregator** — one host fronting many models. Unusually high coverage per entry. |
 | `www.meta.ai` | Meta AI | Consumer reach; increasingly present on managed devices. |
 | `you.com` | You.com | AI search with a chat composer. |
-| `huggingface.co` ⚠️ | HuggingChat | Open-model chat. ⚠️ The chat lives at a **path** (`/chat`), not its own host — so a host-level entry over-matches the whole of Hugging Face, which is mostly not a chat tool. **This one may need path handling or should be dropped.** |
+| ~~`huggingface.co`~~ | ~~HuggingChat~~ | 🔴 **DROPPED by the founder, 2026-08-06.** The chat lives at a **path** (`/chat`), not its own host, so a host-level entry over-matches the whole of Hugging Face — mostly not a chat tool. Revisit only with path matching. |
 
 ---
 
@@ -116,7 +128,7 @@ the protection list by design — that asymmetry is the whole reason for the spl
 | `lovable.dev` | Lovable | Same class. |
 | `replit.com` | Replit (AI) | Agent features; broad host, so **awareness only** is the right level. |
 | `copilot.cloud.microsoft` ⚠️ | Microsoft 365 Copilot | 🔴 **Deliberately awareness-only.** It is embedded inside Office surfaces rather than being a chat page, so the composer model does not apply. Also, per doc 00 §2.4, Microsoft is *"the existential competitor"* — claiming to protect their surface is a claim to inspect. |
-| `github.com` | GitHub Copilot Chat | ⚠️ Broad host, mostly not an AI tool. Same over-match problem as Hugging Face. **May not be worth including at all** — flagged rather than quietly added. |
+| ~~`github.com`~~ | ~~GitHub Copilot Chat~~ | 🔴 **DROPPED by the founder, 2026-08-06.** Broad host, mostly not an AI tool — same over-match problem as Hugging Face. |
 
 ---
 
@@ -150,12 +162,14 @@ time to do steps 2 and 3 properly.
 
 ---
 
-## 5. The two decisions I need from you
+## 5. ✅ Both decisions are made
 
-1. **The names** — cut, add, or reorder. Group B (the ZH tools) is my least confident and
-   the first place to cut if twelve is too many.
-2. **The two over-matching hosts** — `huggingface.co` and `github.com` are mostly *not* AI
-   tools, so a host-level entry warns on far more than it should. Options: add path
-   matching (real work), accept the over-warning, or drop them. **My recommendation: drop
-   both from the starter lists** and revisit if the Ignore-rate data says people are
-   actually using them.
+1. **The names** — **all approved as proposed**, including Group B (the ZH tools), which I
+   had flagged as the first place to cut. The founder kept them: the wedge is EN/BM/ZH, and
+   a protection list with no ZH-first tools does not serve it.
+2. **The two over-matching hosts** — **both dropped**, matching my recommendation. Revisit
+   only if Ignore-rate data on real work shows people actually using them, and only with
+   path matching rather than a host entry.
+
+**What remains before implementation (Piece 4):** hostname verification (§4) and a U31
+probe per protection host. Neither is blocking; Pieces 2 and 3 come first.
