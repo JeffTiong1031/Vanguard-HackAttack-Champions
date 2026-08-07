@@ -35,9 +35,11 @@ export function Requests({ scope }: { scope: Scope }) {
   async function decide(id: string, decision: 'approved' | 'blocked') {
     setBusyId(id); setError('');
     try {
-      await api.post(`${base}/${id}`, decision === 'blocked'
-        ? { decision, reason_code: 'policy_requirement_not_met', note: notes[id]?.trim() }
-        : { decision });
+      await api.post(`${base}/${id}`, {
+        decision,
+        ...(decision === 'blocked' ? { reason_code: 'policy_requirement_not_met' } : {}),
+        note: notes[id]?.trim() || undefined,
+      });
       await load();
     } catch (err) {
       if (err instanceof UnauthorisedError) throw err;
@@ -161,10 +163,10 @@ export function Requests({ scope }: { scope: Scope }) {
                     <td>{r.reason}</td>
                     <td><code>{new Date(r.created_at).toLocaleTimeString()}</code></td>
                     <td style="text-align:right">
-                      {r.status === 'pending' && !readOnly ? (
+                      {r.status === 'pending' ? (
                         <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
                           <input
-                            placeholder="Explanation required when blocked"
+                            placeholder="Explanation (optional for approve, required for block)"
                             value={notes[r.id] ?? ''}
                             onInput={(e) => setNotes({ ...notes, [r.id]: (e.target as HTMLInputElement).value })}
                             style="width:220px;padding:6px 8px;border:1px solid var(--line);border-radius:var(--r-md);font-size:12.5px"

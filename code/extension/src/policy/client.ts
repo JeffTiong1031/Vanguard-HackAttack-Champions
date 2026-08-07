@@ -101,3 +101,16 @@ export async function fetchNotifications(): Promise<NotificationRow[]> {
     return [];
   }
 }
+
+export async function fetchRequests(): Promise<any[]> {
+  const enrolment = await getEnrolment();
+  if (!enrolment) return [];
+  const base = await getPolicyBase();
+  try {
+    const res = await timedFetch(`${base}/v1/requests?pseudo_id=${encodeURIComponent(enrolment.pseudo_id)}`);
+    if (!res.ok) return [];
+    return await res.json();
+  } catch {
+    return [];
+  }
+}

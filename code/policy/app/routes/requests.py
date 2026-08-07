@@ -23,7 +23,21 @@ async def create_request(body: AccessRequestCreate) -> dict[str, str]:
         "SELECT id FROM llm_registry WHERE id = %s", (body.llm_id,)
     ).fetchone()
     if tool is None:
-        raise HTTPException(status_code=404, detail="unknown tool")
+        host_name = body.llm_id
+        if host_name.startswith("tool_"):
+            host_name = host_name[5:].replace("_", ".")
+        conn.execute(
+            "INSERT INTO llm_registry (id, host, display_name) VALUES (%s, %s, %s)"
+            " ON CONFLICT (id) DO NOTHING",
+            (body.llm_id, host_name, host_name),
+        )
+        conn.execute(
+            "INSERT INTO org_llm_policy (org_id, llm_id, status) VALUES (%s, %s, 'blocked')"
+            " ON CONFLICT DO NOTHING",
+            (emp["org_id"], body.llm_id),
+        )
+        conn.commit()
+
 
     now_str = now_iso()
     # Pre-screen 1: an already-approved or active temporary/trial/conditional policy needs no new queue item.

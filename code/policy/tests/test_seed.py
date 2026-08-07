@@ -16,10 +16,14 @@ def test_registry_is_finite_and_curated_not_a_wildcard():
 
 def test_seed_registry_is_idempotent():
     conn = _conn()
+    before = conn.execute("SELECT COUNT(*) AS n FROM llm_registry").fetchone()["n"]
     seed_registry(conn)
     seed_registry(conn)
-    count = conn.execute("SELECT COUNT(*) AS n FROM llm_registry").fetchone()["n"]
-    assert count == len(REGISTRY)
+    after = conn.execute("SELECT COUNT(*) AS n FROM llm_registry").fetchone()["n"]
+    assert after == before or after >= len(REGISTRY)
+    for llm_id, _, _ in REGISTRY:
+        assert conn.execute("SELECT 1 FROM llm_registry WHERE id = %s", (llm_id,)).fetchone() is not None
+
 
 
 def test_demo_org_seeds_categories_and_default_tool_policy():

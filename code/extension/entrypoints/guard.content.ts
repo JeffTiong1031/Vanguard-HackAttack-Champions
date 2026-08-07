@@ -3,23 +3,18 @@ import { POLICY_CONFIG } from '../src/policy/config';
 import { toolForHost } from '../src/policy/lookup';
 import type { PolicyRequest, PolicyResponse } from '../src/policy/messages';
 import type { Enrolment, GovernanceEvent, Policy } from '../src/policy/types';
-import { hideWarnBanner, showWarnBanner } from '../src/ui/warn-banner';
+import { hideWarnBanner, showWarnBanner, updateWarnBanner } from '../src/ui/warn-banner';
 import { setupKeepAliveClient } from '../src/util/keepalive';
 
 /** Every registry host. Keep in step with code/policy/app/seed.py's REGISTRY. */
 const REGISTRY_MATCHES = [
-  'https://chatgpt.com/*',
-  'https://claude.ai/*',
-  'https://gemini.google.com/*',
-  'https://copilot.microsoft.com/*',
-  'https://www.perplexity.ai/*',
-  'https://chat.deepseek.com/*',
-  'https://chat.mistral.ai/*',
-  'https://grok.com/*',
+  'https://*/*',
+  'http://*/*',
 ];
 
-function ask(msg: PolicyRequest): Promise<PolicyResponse> {
-  return chrome.runtime.sendMessage(msg) as Promise<PolicyResponse>;
+
+function ask<T = PolicyResponse>(msg: PolicyRequest): Promise<T> {
+  return chrome.runtime.sendMessage(msg) as Promise<T>;
 }
 
 function emit(event: GovernanceEvent): void {
@@ -31,6 +26,9 @@ export default defineContentScript({
   runAt: 'document_idle',
   world: 'ISOLATED',
   async main() {
+    if (location.hostname === 'localhost' && location.port === '8001') return;
+    if (location.hostname === 'www.google.com') return;
+
     const caps = capabilitiesFor((await getMode()) ?? 'personal');
     if (!caps.toolPolicy) return;   // Personal: no warn banner, no polling, no events
 
@@ -40,13 +38,16 @@ export default defineContentScript({
     setupKeepAliveClient();
 
     let shownFor: string | null = null;   // llm_id the banner is currently up for
-    let dismissed = false;                // per page load; a reload warns again
     let reportedVisit = false;
 
     async function tick(): Promise<void> {
       let response: PolicyResponse;
+      let reqResponse: any;
       try {
-        response = await ask({ kind: 'policy-get' });
+        [response, reqResponse] = await Promise.all([
+          ask<PolicyResponse>({ kind: 'policy-get' }),
+          ask<any>({ kind: 'policy-requests-get' })
+        ]);
       } catch {
         return;   // worker restarting; the next tick picks it up
       }
@@ -57,11 +58,54 @@ export default defineContentScript({
       if (!policy || !enrolment) return;   // not enrolled: never warn
 
       const tool = toolForHost(policy, location.hostname);
+      const toolId = tool ? tool.llm_id : `tool_${location.hostname.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+      const toolName = tool ? tool.display_name : location.hostname;
 
-      // Approved, or not a governed tool at all -> take the banner down. This is
-      // the demo's pivot: the admin approves and the banner clears itself.
-      if (!tool || tool.status === 'approved') {
+      let requestStatus = 'none';
+      let adminNote = '';
+      if (reqResponse?.ok && reqResponse.requests) {
+        const myReq = reqResponse.requests.find((r: any) => r.llm_id === toolId);
+        if (myReq) {
+          requestStatus = myReq.status;
+          adminNote = myReq.admin_note || '';
+        }
+      }
+
+      if (requestStatus === 'blocked') {
+        if (!document.querySelector('[data-vanguard-ui="warn-banner"]')) {
+          showWarnBanner({
+            toolName, orgName: enrolment.org_name,
+            onDismiss: () => { shownFor = null; },
+            onRequest: async () => {},
+          });
+        }
+        updateWarnBanner('blocked', adminNote);
+        shownFor = toolId;
+        return;
+      }
+
+      if (requestStatus === 'approved') {
         if (shownFor) { hideWarnBanner(); shownFor = null; }
+        return;
+      }
+
+      // Only explicitly approved tools take/keep the banner down.
+      // All other websites (unapproved or unlisted) display the banner.
+      if (tool && tool.status === 'approved') {
+        if (shownFor) { hideWarnBanner(); shownFor = null; }
+        return;
+      }
+
+      if (requestStatus === 'pending') {
+        if (!document.querySelector('[data-vanguard-ui="warn-banner"]')) {
+          showWarnBanner({
+            toolName, orgName: enrolment.org_name,
+            onDismiss: () => { shownFor = null; },
+            onRequest: async () => {},
+          });
+        }
+        updateWarnBanner('sent');
+        shownFor = toolId;
         return;
       }
 
@@ -69,19 +113,21 @@ export default defineContentScript({
         reportedVisit = true;
         emit({ host: location.hostname, type: 'visit_unapproved', ts: new Date().toISOString() });
       }
-      if (dismissed || shownFor === tool.llm_id) return;
+      if (shownFor === toolId) return;
 
-      shownFor = tool.llm_id;
+      shownFor = toolId;
       emit({ host: location.hostname, type: 'warn_shown', ts: new Date().toISOString() });
       showWarnBanner({
-        toolName: tool.display_name,
+        toolName,
         orgName: enrolment.org_name,
-        onDismiss: () => { dismissed = true; shownFor = null; },
+        onDismiss: () => { shownFor = null; },
         onRequest: async (reason) => {
-          await ask({ kind: 'policy-request-access', llmId: tool.llm_id, reason });
+          await ask({ kind: 'policy-request-access', llmId: toolId, reason });
           emit({ host: location.hostname, type: 'request_sent', ts: new Date().toISOString() });
+          updateWarnBanner('sent');
         },
       });
+
     }
 
     void tick();

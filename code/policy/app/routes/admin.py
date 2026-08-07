@@ -30,7 +30,7 @@ from app.analytics import analytics_summary, analytics_alerts
 from app.authz import require_company
 from app.db import bump_policy_version
 from app.deps import get_conn
-from app.models import AdminLogin
+from app.models import AdminLogin, AccessDecision
 from app.security import hash_token, issue_session, new_token, now_iso
 
 router = APIRouter(prefix="/v1/admin")
@@ -141,15 +141,76 @@ async def list_tools(vg_admin: str | None = Cookie(default=None)) -> list[dict]:
     ).fetchall()]
 
 
+@router.post("/tools", status_code=201)
+async def create_tool(
+    host: str = Body(embed=True),
+    display_name: str = Body(embed=True),
+    status: str = Body(default="approved", embed=True),
+    access_mode: str = Body(default="standard", embed=True),
+    vg_admin: str | None = Cookie(default=None),
+) -> dict:
+    import re
+    org_id = require_company(vg_admin)
+    if status not in ("approved", "blocked", "temporary", "trial", "conditional"):
+        raise HTTPException(status_code=422, detail="invalid status")
+    if access_mode not in ("standard", "strict_redaction", "no_file_uploads"):
+        raise HTTPException(status_code=422, detail="invalid access_mode")
+
+    clean_host = host.strip().lower()
+    if clean_host.startswith("http://"):
+        clean_host = clean_host[7:]
+    elif clean_host.startswith("https://"):
+        clean_host = clean_host[8:]
+    clean_host = clean_host.split('/')[0].strip()
+
+    clean_name = display_name.strip()
+    if not clean_host or not clean_name:
+        raise HTTPException(status_code=422, detail="host and display_name are required")
+
+    conn = get_conn()
+    existing = conn.execute("SELECT id FROM llm_registry WHERE host = %s", (clean_host,)).fetchone()
+    if existing:
+        llm_id = existing["id"]
+        conn.execute("UPDATE llm_registry SET display_name = %s WHERE id = %s", (clean_name, llm_id))
+    else:
+        slug = re.sub(r"[^a-z0-9]", "_", clean_host)
+        llm_id = f"tool_{slug}" if slug else uuid.uuid4().hex[:12]
+        if conn.execute("SELECT 1 FROM llm_registry WHERE id = %s", (llm_id,)).fetchone():
+            llm_id = f"tool_{uuid.uuid4().hex[:8]}"
+        conn.execute(
+            "INSERT INTO llm_registry (id, host, display_name) VALUES (%s, %s, %s)",
+            (llm_id, clean_host, clean_name),
+        )
+
+    conn.execute(
+        "INSERT INTO org_llm_policy (org_id, llm_id, status, access_mode) VALUES (%s, %s, %s, %s)"
+        " ON CONFLICT (org_id, llm_id) DO UPDATE SET status = EXCLUDED.status, access_mode = EXCLUDED.access_mode",
+        (org_id, llm_id, status, access_mode),
+    )
+    conn.commit()
+    version = bump_policy_version(conn, org_id)
+    return {
+        "llm_id": llm_id,
+        "host": clean_host,
+        "display_name": clean_name,
+        "status": status,
+        "access_mode": access_mode,
+        "version": version,
+    }
+
+
 @router.post("/tools/{llm_id}")
+@router.put("/tools/{llm_id}")
 async def set_tool(
     llm_id: str,
-    status: str = Body(embed=True),
+    status: str = Body(default="approved", embed=True),
     access_mode: str = Body(default="standard", embed=True),
+    host: str | None = Body(default=None, embed=True),
+    display_name: str | None = Body(default=None, embed=True),
     duration_days: int | None = Body(default=None, embed=True),
     expires_at: str | None = Body(default=None, embed=True),
     vg_admin: str | None = Cookie(default=None),
-) -> dict[str, int]:
+) -> dict:
     from datetime import datetime, timedelta, timezone
 
     org_id = require_company(vg_admin)
@@ -165,15 +226,51 @@ async def set_tool(
         final_expires_at = expires_at
 
     conn = get_conn()
+    tool_row = conn.execute("SELECT id, host, display_name FROM llm_registry WHERE id = %s", (llm_id,)).fetchone()
+    if not tool_row:
+        raise HTTPException(status_code=404, detail="unknown tool")
+
+    if host is not None or display_name is not None:
+        new_host = tool_row["host"]
+        if host is not None:
+            clean_host = host.strip().lower()
+            if clean_host.startswith("http://"):
+                clean_host = clean_host[7:]
+            elif clean_host.startswith("https://"):
+                clean_host = clean_host[8:]
+            clean_host = clean_host.split('/')[0].strip()
+            if not clean_host:
+                raise HTTPException(status_code=422, detail="invalid host")
+            dup = conn.execute("SELECT id FROM llm_registry WHERE host = %s AND id != %s", (clean_host, llm_id)).fetchone()
+            if dup:
+                raise HTTPException(status_code=409, detail="host already exists in registry")
+            new_host = clean_host
+
+        new_name = tool_row["display_name"]
+        if display_name is not None:
+            clean_name = display_name.strip()
+            if not clean_name:
+                raise HTTPException(status_code=422, detail="invalid display_name")
+            new_name = clean_name
+
+        conn.execute(
+            "UPDATE llm_registry SET host = %s, display_name = %s WHERE id = %s",
+            (new_host, new_name, llm_id),
+        )
+
     cur = conn.execute(
         "UPDATE org_llm_policy SET status = %s, access_mode = %s, expires_at = %s WHERE org_id = %s AND llm_id = %s",
         (status, access_mode, final_expires_at, org_id, llm_id),
     )
     if cur.rowcount == 0:
-        raise HTTPException(status_code=404, detail="unknown tool")
+        conn.execute(
+            "INSERT INTO org_llm_policy (org_id, llm_id, status, access_mode, expires_at)"
+            " VALUES (%s, %s, %s, %s, %s)",
+            (org_id, llm_id, status, access_mode, final_expires_at),
+        )
     conn.commit()
-    # Changes what GET /v1/policy serves for this org -- bump.
     return {"version": bump_policy_version(conn, org_id)}
+
 
 
 @router.get("/requests")
@@ -192,6 +289,73 @@ async def list_requests(vg_admin: str | None = Cookie(default=None)) -> list[dic
         " WHERE a.org_id = %s ORDER BY a.created_at DESC",
         (org_id,),
     ).fetchall()]
+
+
+@router.post("/requests/{request_id}")
+async def admin_decide_request(
+    request_id: str, body: AccessDecision,
+    vg_admin: str | None = Cookie(default=None),
+) -> dict[str, int | str]:
+    from datetime import datetime, timedelta, timezone
+
+    org_id = require_company(vg_admin)
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT a.llm_id, a.employee_id, r.display_name, e.department_id FROM access_requests a"
+        " JOIN employees e ON e.id = a.employee_id"
+        " LEFT JOIN llm_registry r ON r.id = a.llm_id"
+        " WHERE a.id = %s AND a.org_id = %s AND a.status = 'pending'",
+        (request_id, org_id),
+    ).fetchone()
+    if row is None:
+        exists = conn.execute(
+            "SELECT 1 FROM access_requests a"
+            " WHERE a.id = %s AND a.org_id = %s",
+            (request_id, org_id),
+        ).fetchone()
+        raise HTTPException(status_code=404 if exists is None else 409,
+                            detail="unknown request" if exists is None else "request already decided")
+
+    expires_at = None
+    if body.duration_days:
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=body.duration_days)).isoformat()
+    elif body.expires_at:
+        expires_at = body.expires_at
+
+    conn.execute(
+        "UPDATE access_requests SET status = %s, reason_code = %s, admin_note = %s, decided_at = %s,"
+        " access_mode = %s, expires_at = %s"
+        " WHERE id = %s",
+        (body.decision, body.reason_code, body.note, now_iso(), body.access_mode, expires_at, request_id),
+    )
+
+    from app.routes.notifications import create_notification
+    tool_name = row["display_name"] if row and row.get("display_name") else row["llm_id"]
+    title = f"Access Request {body.decision.capitalize()}: {tool_name}"
+    msg_text = f"Your request for access to {tool_name} was reviewed and set to {body.decision.upper()}."
+    if body.note:
+        msg_text += f" Manager note: {body.note}"
+    create_notification(conn, org_id, row["employee_id"], "request_decision", title, msg_text)
+
+    if body.decision != "blocked":
+        conn.execute(
+            "INSERT INTO dept_llm_policy (org_id, department_id, llm_id, status, access_mode, expires_at)"
+            " VALUES (%s, %s, %s, %s, %s, %s)"
+            " ON CONFLICT (department_id, llm_id) DO UPDATE SET status = EXCLUDED.status,"
+            " access_mode = EXCLUDED.access_mode, expires_at = EXCLUDED.expires_at",
+            (org_id, row["department_id"], row["llm_id"], body.decision, body.access_mode, expires_at),
+        )
+        return {"version": bump_policy_version(conn, org_id), "access_state": body.decision}
+
+    conn.execute(
+        "INSERT INTO dept_llm_policy (org_id, department_id, llm_id, status, access_mode, expires_at)"
+        " VALUES (%s, %s, %s, 'blocked', 'standard', NULL)"
+        " ON CONFLICT (department_id, llm_id) DO UPDATE SET status = 'blocked',"
+        " access_mode = 'standard', expires_at = NULL",
+        (org_id, row["department_id"], row["llm_id"]),
+    )
+    conn.commit()
+    return {"version": bump_policy_version(conn, org_id), "access_state": "blocked"}
 
 
 @router.get("/appeals")

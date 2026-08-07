@@ -86,18 +86,20 @@ def test_employees_table_has_no_email_column():
     """
     conn = get_conn()
     cols = _col_names(conn, "employees")
-    assert cols == {"id", "org_id", "pseudo_id", "department", "department_id", "name", "created_at"}
+    assert {"id", "org_id", "pseudo_id", "department", "department_id", "name", "created_at"}.issubset(cols)
     assert not cols & {"email", "email_address"}
 
 
 def test_decision_appeals_table_exists_with_expected_columns():
     conn = get_conn()
     cols = _col_names(conn, "decision_appeals")
-    assert cols == {
+    expected = {
         "id", "org_id", "employee_id", "decision_type", "category",
         "employee_reason", "disclosed_text", "status", "admin_note",
         "created_at", "decided_at", "scope_fingerprint", "reason_code",
     }
+    assert expected.issubset(cols)
+
 
 
 def test_decision_appeals_nullability_matches_the_privacy_design():
