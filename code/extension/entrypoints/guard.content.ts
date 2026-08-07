@@ -28,6 +28,7 @@ export default defineContentScript({
   async main() {
     if (location.hostname === 'localhost' && location.port === '8001') return;
     if (location.hostname === 'www.google.com') return;
+    if (location.hostname === 'vanguard-policy-nh59.onrender.com') return;
 
     const caps = capabilitiesFor((await getMode()) ?? 'personal');
     if (!caps.toolPolicy) return;   // Personal: no warn banner, no polling, no events
