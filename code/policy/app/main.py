@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from starlette.requests import Request
 
 from app.db import migrate_on_dedicated_connection
+from app.deps import get_conn
 
 # No APM, no body capture. Same posture as code/backend/app/main.py, and this
 # module is where a reviewer looks to confirm it.

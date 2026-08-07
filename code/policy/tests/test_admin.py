@@ -1,4 +1,4 @@
-﻿import uuid
+import uuid
 
 from fastapi.testclient import TestClient
 
@@ -126,3 +126,51 @@ def test_company_can_see_all_departments_usage():
     c, org_id = _company_client()
     body = c.get("/v1/admin/usage").json()
     assert set(body.keys()) == {"by_department", "by_tool", "by_category"}
+
+
+def test_create_and_edit_tool_route():
+    c, org_id = _company_client()
+    host1 = f"test-{uuid.uuid4().hex[:6]}.ai"
+    host2 = f"test-edit-{uuid.uuid4().hex[:6]}.ai"
+
+    # 1. Create a new tool
+    r = c.post("/v1/admin/tools", json={
+        "host": host1,
+        "display_name": "Unique Test AI",
+        "status": "approved",
+        "access_mode": "strict_redaction"
+    })
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert data["host"] == host1
+    assert data["display_name"] == "Unique Test AI"
+    assert data["status"] == "approved"
+    assert data["access_mode"] == "strict_redaction"
+    llm_id = data["llm_id"]
+
+    # 2. Check it appears in /v1/admin/tools
+    tools = c.get("/v1/admin/tools").json()
+    match = [t for t in tools if t["llm_id"] == llm_id]
+    assert len(match) == 1
+    assert match[0]["host"] == host1
+    assert match[0]["display_name"] == "Unique Test AI"
+
+    # 3. Edit the tool via PUT /v1/admin/tools/{llm_id}
+    r2 = c.put(f"/v1/admin/tools/{llm_id}", json={
+        "host": host2,
+        "display_name": "Edited Unique Test AI",
+        "status": "blocked",
+        "access_mode": "no_file_uploads"
+    })
+    assert r2.status_code == 200, r2.text
+
+    # 4. Verify updated values in GET /v1/admin/tools
+    tools_updated = c.get("/v1/admin/tools").json()
+    match2 = [t for t in tools_updated if t["llm_id"] == llm_id]
+    assert len(match2) == 1
+    assert match2[0]["host"] == host2
+    assert match2[0]["display_name"] == "Edited Unique Test AI"
+    assert match2[0]["status"] == "blocked"
+    assert match2[0]["access_mode"] == "no_file_uploads"
+
+

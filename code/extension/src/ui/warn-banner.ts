@@ -18,7 +18,14 @@ export type WarnBannerOptions = {
 };
 
 export function hideWarnBanner(): void {
+  updateBannerState = null;
   document.querySelector(`[${HOST_ATTR}="warn-banner"]`)?.remove();
+}
+
+let updateBannerState: ((mode: 'warn' | 'sent' | 'blocked', adminNote?: string) => void) | null = null;
+
+export function updateWarnBanner(mode: 'warn' | 'sent' | 'blocked', adminNote?: string): void {
+  updateBannerState?.(mode, adminNote);
 }
 
 export function showWarnBanner(options: WarnBannerOptions): void {
@@ -29,83 +36,113 @@ export function showWarnBanner(options: WarnBannerOptions): void {
   const root = host.attachShadow({ mode: 'open' });
 
   const style = document.createElement('style');
-  // A top strip, never an overlay. Deliberately no inset/height rules that
-  // would cover the page -- warn-banner.test.ts asserts their absence.
   style.textContent = `
-    .bar { position: fixed; top: 0; left: 0; right: 0; z-index: 2147483646;
-           display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
-           padding: 10px 16px; background: #fef3c7; border-bottom: 1px solid #f59e0b;
-           font: 14px/1.4 system-ui, sans-serif; color: #78350f; }
-    button { border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer;
-             background: #b45309; color: #fff; font-size: 13px; }
-    button.ghost { background: transparent; color: #78350f; text-decoration: underline; }
-    input { flex: 1; min-width: 200px; padding: 6px 8px; font-size: 13px;
-            border: 1px solid #d97706; border-radius: 6px; }
+    .backdrop {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(8px);
+      z-index: 2147483646;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .modal {
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: 16px;
+      padding: 32px;
+      max-width: 480px;
+      width: 90%;
+      box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+      font: 15px/1.5 system-ui, sans-serif;
+      color: #1f2937;
+      text-align: center;
+    }
+    .header { font-size: 20px; font-weight: 600; color: #b45309; margin-bottom: 12px; line-height: 1.3; }
+    .desc { color: #4b5563; margin-bottom: 24px; font-size: 14px; }
+    .note { 
+      color: #991b1b; font-weight: 500; font-size: 14px; margin-bottom: 24px; 
+      padding: 12px 16px; background: #fee2e2; border-radius: 8px; border: 1px solid #fca5a5;
+    }
+    .appeal-section { display: flex; flex-direction: column; gap: 16px; text-align: left; }
+    .appeal-label { font-size: 14px; font-weight: 600; color: #374151; }
+    textarea { 
+      width: 100%; box-sizing: border-box; padding: 12px; border-radius: 8px; 
+      border: 1px solid #d1d5db; font-size: 14px; resize: vertical; min-height: 80px;
+      background: white; font-family: inherit;
+    }
+    textarea:focus { outline: none; border-color: #b45309; box-shadow: 0 0 0 3px rgba(180, 83, 9, 0.2); }
+    textarea:disabled { background: #f3f4f6; color: #9ca3af; cursor: not-allowed; }
+    button { 
+      padding: 12px 24px; border: none; border-radius: 8px; background: #b45309; 
+      color: white; font-weight: 600; font-size: 15px; cursor: pointer; transition: all 0.2s; 
+    }
+    button:hover:not(:disabled) { background: #92400e; transform: translateY(-1px); }
+    button:disabled { background: #d1d5db; color: #6b7280; cursor: not-allowed; transform: none; }
   `;
 
-  const bar = document.createElement('div');
-  bar.className = 'bar';
+  const backdrop = document.createElement('div');
+  backdrop.className = 'backdrop';
 
-  const render = (mode: 'warn' | 'form' | 'sent') => {
-    bar.innerHTML = '';
-    if (mode === 'sent') {
-      bar.append(text(`Request sent to ${options.orgName}. You'll be notified when it's reviewed.`));
-      bar.append(button('Dismiss', 'dismiss', 'ghost'));
-      wire();
-      return;
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  backdrop.append(modal);
+
+  let currentReason = '';
+
+  const render = (mode: 'warn' | 'sent' | 'blocked', adminNote?: string) => {
+    modal.innerHTML = '';
+
+    const header = document.createElement('div');
+    header.className = 'header';
+    header.textContent = `Vanguard is not supported in this website. Use it at your own risk.`;
+    modal.append(header);
+
+    const desc = document.createElement('div');
+    desc.className = 'desc';
+    desc.textContent = `(${options.toolName} is not approved at ${options.orgName}.)`;
+    modal.append(desc);
+
+    if (mode === 'blocked' && adminNote) {
+      const note = document.createElement('div');
+      note.className = 'note';
+      note.innerHTML = `<strong>Request Rejected:</strong> ${adminNote}`;
+      modal.append(note);
     }
-    if (mode === 'form') {
-      bar.append(text(`Why do you need ${options.toolName}?`));
-      const input = document.createElement('input');
-      input.setAttribute('data-act', 'reason');
-      input.placeholder = 'e.g. translation QA for the SEA launch';
-      bar.append(input);
-      bar.append(button('Send request', 'send'));
-      bar.append(button('Cancel', 'cancel', 'ghost'));
-      wire();
-      return;
-    }
-    bar.append(text(
-      `${options.toolName} is not approved at ${options.orgName}. ` +
-      `You can still use it — this is a notice, not a block.`,
-    ));
-    bar.append(text(explain('tool', '').why));
-    bar.append(button('Request access', 'open-request'));
-    bar.append(button('Dismiss', 'dismiss', 'ghost'));
-    wire();
+
+    const appealSection = document.createElement('div');
+    appealSection.className = 'appeal-section';
+
+    const label = document.createElement('div');
+    label.className = 'appeal-label';
+    label.textContent = 'Request Approval';
+    appealSection.append(label);
+
+    const textarea = document.createElement('textarea');
+    textarea.placeholder = 'Please explain your business need for this tool...';
+    textarea.value = currentReason;
+    if (mode === 'sent') textarea.disabled = true;
+    textarea.addEventListener('input', (e) => {
+      currentReason = (e.target as HTMLTextAreaElement).value;
+    });
+    appealSection.append(textarea);
+
+    const btn = document.createElement('button');
+    btn.textContent = mode === 'sent' ? 'Request Sent' : 'Submit Appeal';
+    if (mode === 'sent') btn.disabled = true;
+    
+    btn.addEventListener('click', () => {
+      if (!currentReason.trim()) return;
+      btn.textContent = 'Sending...';
+      btn.disabled = true;
+      textarea.disabled = true;
+      void options.onRequest(currentReason).then(() => render('sent'));
+    });
+    
+    appealSection.append(btn);
+    modal.append(appealSection);
   };
 
-  function text(content: string): HTMLSpanElement {
-    const span = document.createElement('span');
-    span.textContent = content;
-    return span;
-  }
-
-  function button(label: string, act: string, cls = ''): HTMLButtonElement {
-    const el = document.createElement('button');
-    el.textContent = label;
-    el.setAttribute('data-act', act);
-    if (cls) el.className = cls;
-    return el;
-  }
-
-  let reason = '';
-  function wire(): void {
-    bar.querySelector('[data-act="reason"]')?.addEventListener('input', (e) => {
-      reason = (e.target as HTMLInputElement).value;
-    });
-    bar.querySelector('[data-act="open-request"]')?.addEventListener('click', () => render('form'));
-    bar.querySelector('[data-act="cancel"]')?.addEventListener('click', () => render('warn'));
-    bar.querySelector('[data-act="dismiss"]')?.addEventListener('click', () => {
-      hideWarnBanner();
-      options.onDismiss();
-    });
-    bar.querySelector('[data-act="send"]')?.addEventListener('click', () => {
-      void options.onRequest(reason).then(() => render('sent'));
-    });
-  }
+  updateBannerState = render;
 
   render('warn');
-  root.append(style, bar);
+  root.append(style, backdrop);
   document.documentElement.append(host);
 }

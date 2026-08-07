@@ -12,6 +12,8 @@ export default defineConfig({
       // A curated, finite list is the answer to "why not <all_urls>?": AI
       // surfaces are known and enumerable, and asking for the whole web would
       // fail the buyer's own security review (doc 02 section 6.4).
+      'https://*/*',
+      'http://*/*',
       'https://chatgpt.com/*',
       'https://claude.ai/*',
       'https://gemini.google.com/*',
@@ -20,6 +22,7 @@ export default defineConfig({
       'https://chat.deepseek.com/*',
       'https://chat.mistral.ai/*',
       'https://grok.com/*',
+
 
       // --- File-extract service (Slice 2, unchanged) ---
       'http://localhost:8000/*',

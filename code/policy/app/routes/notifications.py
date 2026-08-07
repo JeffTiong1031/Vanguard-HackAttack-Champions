@@ -36,9 +36,8 @@ def create_notification(conn, org_id: str, employee_id: str, kind: str, title: s
     
     emp_email = f"employee-{employee_id[:8]}@company.internal"
     
-    # Automated Email Alert Dispatch Simulation
-    logger.info("[EMAIL DISPATCHED] To: %s | Subject: %s | Body: %s", emp_email, title, message)
-    print(f"\n📩 [EMAIL NOTIFICATION DISPATCHED]\n  To: {emp_email}\n  Subject: {title}\n  Message: {message}\n")
+    # Notifications are only saved to the DB for in-app display.
+
 
     return notif_id
 

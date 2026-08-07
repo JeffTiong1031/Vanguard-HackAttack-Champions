@@ -19,11 +19,16 @@ export type PolicyRequest =
   | { kind: 'appeal-submit'; decisionType: 'ethics' | 'pii'; category: string; reason: string; disclosedText?: string; promptHash?: string }
   | { kind: 'appeals-get' }
   | { kind: 'appeal-allowance-check'; promptHash: string }
-  | { kind: 'notifications-get' };
+  | { kind: 'notifications-get' }
+  | { kind: 'policy-requests-get' };
 
 export type PolicyResponse =
   | { kind: 'policy-result'; ok: true; policy: Policy | null; enrolment: Enrolment | null }
   | { kind: 'policy-result'; ok: false; error: string };
+
+export type RequestsResponse =
+  | { kind: 'requests-result'; ok: true; requests: any[] }
+  | { kind: 'requests-result'; ok: false; error: string };
 
 export type AppealsResponse =
   | { kind: 'appeals-result'; ok: true; appeals: AppealRow[] }

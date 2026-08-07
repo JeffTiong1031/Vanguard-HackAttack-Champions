@@ -22,7 +22,7 @@ export class NetworkError extends Error {
 
 /** Typed fetch wrapper. `credentials: 'include'` carries the HttpOnly session
  *  cookie the admin login sets — the console never holds a token itself. */
-async function call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+async function call<T>(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown): Promise<T> {
   let response: Response;
   try {
     response = await fetch(path, {
@@ -52,12 +52,18 @@ async function call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Pr
 export const api = {
   get: <T,>(path: string) => call<T>('GET', path),
   post: <T,>(path: string, body?: unknown) => call<T>('POST', path, body),
+  put: <T,>(path: string, body?: unknown) => call<T>('PUT', path, body),
 };
 
 export type Tool = {
-  llm_id: string; host: string; display_name: string;
-  status: 'approved' | 'blocked';
+  llm_id: string;
+  host: string;
+  display_name: string;
+  status: 'approved' | 'blocked' | 'temporary' | 'trial' | 'conditional';
+  access_mode?: 'standard' | 'strict_redaction' | 'no_file_uploads';
+  expires_at?: string | null;
 };
+
 export type TokenRow = {
   id: string; department: string; label: string; name?: string; created_at: string; revoked: number;
 };

@@ -3,9 +3,9 @@ import { buildRunRequest, type ScanRequest, type ScanResponse } from '../src/det
 import { loadConfig, type SensitivityConfig } from '../src/detection/l2/sensitivity';
 import { recordStatus } from '../src/detection/l2/status-store';
 // Policy leg (Plan B governance integration).
-import { enrol, refreshPolicy, sendAccessRequest, fetchNotifications } from '../src/policy/client';
+import { enrol, refreshPolicy, sendAccessRequest, fetchNotifications, fetchRequests } from '../src/policy/client';
 import { queueEvent, flushNow } from '../src/policy/events';
-import { isPolicyRequest, type PolicyRequest, type PolicyResponse, type AppealsResponse, type AllowanceResponse, type NotificationsResponse } from '../src/policy/messages';
+import { isPolicyRequest, type PolicyRequest, type PolicyResponse, type AppealsResponse, type AllowanceResponse, type NotificationsResponse, type RequestsResponse } from '../src/policy/messages';
 import { getCachedPolicy, getEnrolment } from '../src/policy/store';
 import { submitAppeal, fetchMyAppeals, grantPassIfAllowed } from '../src/policy/appeals';
 
@@ -46,40 +46,7 @@ export default defineBackground(() => {
 
   chrome.storage.onChanged.addListener(() => { cfgCache = null; });
 
-  // ─── Proactive notification polling ────────────────────────────────────────
-  // Poll every 30 seconds so the employee is notified as soon as a manager
-  // reviews their prompt appeal — no need to open the ethics modal first.
-  async function pollAndNotify(): Promise<void> {
-    try {
-      const notifs = await fetchNotifications();
-      for (const notif of notifs.filter(n => n.status === 'unread')) {
-        try {
-          if (typeof chrome !== 'undefined' && chrome.notifications?.create) {
-            chrome.notifications.create(`vg-notif-${notif.id}`, {
-              type: 'basic',
-              iconUrl: 'icon-128.png',
-              title: notif.title,
-              message: notif.message,
-              priority: 2,
-            });
-          }
-        } catch {
-          // Notifications permission may not be granted; ignore silently.
-        }
-      }
-    } catch {
-      // Service may be offline; degrade gracefully.
-    }
-  }
-
-  // Create a repeating alarm for notification polling.
-  chrome.alarms.create('vg-notification-poll', { periodInMinutes: 0.5 });
-  chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === 'vg-notification-poll') void pollAndNotify();
-  });
-  // Also poll immediately on startup.
-  void pollAndNotify();
-  // ───────────────────────────────────────────────────────────────────────────
+  // ─── Obsolete notification polling removed ───────────────────────────────────
 
 
   chrome.runtime.onMessage.addListener((msg: ScanRequest, _s, sendResponse) => {
@@ -136,6 +103,10 @@ export default defineBackground(() => {
             } satisfies PolicyResponse);
             return;
           }
+          case 'policy-requests-get': {
+            sendResponse({ kind: 'requests-result', ok: true, requests: await fetchRequests() } satisfies RequestsResponse);
+            return;
+          }
           case 'policy-event': {
             queueEvent(msg.event);
             sendResponse({
@@ -162,21 +133,6 @@ export default defineBackground(() => {
           }
           case 'notifications-get': {
             const notifs = await fetchNotifications();
-            for (const notif of notifs.filter(n => n.status === 'unread')) {
-              try {
-                if (typeof chrome !== 'undefined' && chrome.notifications?.create) {
-                  chrome.notifications.create(notif.id, {
-                    type: 'basic',
-                    iconUrl: 'icon-128.png',
-                    title: notif.title,
-                    message: notif.message,
-                    priority: 2,
-                  });
-                }
-              } catch {
-                // Ignore if notifications permission not granted
-              }
-            }
             sendResponse({ kind: 'notifications-result', ok: true, notifications: notifs } satisfies NotificationsResponse);
             return;
           }

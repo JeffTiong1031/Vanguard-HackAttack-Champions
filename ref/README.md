@@ -44,7 +44,7 @@ Requires **Python 3.11+** and, for the one-time console build, **Node**. From th
 cd code/policy
 python -m venv .venv                                  # 1. create the Python virtual environment
 .venv/Scripts/pip install -e ".[dev]"                 # 2. install backend deps (macOS/Linux: .venv/bin/pip)
-cd admin && npm install && npm run build && cd ..     # 3. build the admin console (the web UI the backend serves)
+cd admin ; npm install ; npm run build ; cd ..     # 3. build the admin console (the web UI the backend serves)
 .venv/Scripts/python scripts/seed.py                  # 4. create the demo org + print 4 tokens — COPY THEM NOW
 ```
 
